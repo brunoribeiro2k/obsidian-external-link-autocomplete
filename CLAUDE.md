@@ -16,12 +16,11 @@ It started as a note in the author's Obsidian vault (`90-meta/obsidian/Idea - Pl
 
 ## Current status
 
-Pre-M0. `src/main.ts` is an empty plugin shell, and only the tooling is in place. The next step is **milestone M0**, a throwaway spike that answers two questions before any real code:
+M0 is done: both questions were answered by reading Obsidian 1.14.4's bundled `app.js` (recorded in `docs/design.md`). Suggesters run in a list with core first, and the first non-null `onTrigger` wins. `http(s)` links aren't in `cache.links`, so the scanner is required.
 
-1. Which `EditorSuggest` wins when several match, and is core's `[[` suggester one of them? This is undocumented, so it has to be answered empirically.
-2. Does `CachedMetadata.links` include `http(s)` Markdown links? If it does, most of the scanner can go.
+M1 (the MVP) is implemented and unit-tested. What's left is walking `Checklist.md` in the generated test vault (desktop and phone), then the first real release and community submission.
 
-Record the answers in `docs/design.md` (Open questions, and the sections they affect).
+`minAppVersion` is 1.13.0, for the declarative settings API. Supporting older Obsidian versions isn't a goal.
 
 ## Decisions already made
 
@@ -35,14 +34,16 @@ Don't re-litigate these without being asked:
 
 ## Layout
 
-- `src/main.ts`: plugin entry (bundled to `main.js`). The planned modules (`scanner`, `trigger`, `ranking`, `index`, `suggest`, `settings`) live next to it in `src/`, per the design doc. `scanner`, `trigger` and `ranking` must stay **pure**: no `obsidian` import, so they're unit-testable under Node.
+- `src/main.ts`: plugin entry (bundled to `main.js`), with `suggest`, `settings` and the pure modules `text`, `scanner`, `trigger`, `ranking` and `index` next to it (see the design doc's module table). The pure modules must stay **pure**: no `obsidian` import, so they're unit-testable under Node.
 - `test/*.test.ts`: `node --test` unit tests, with TypeScript loaded through `tsx` (the local Node build has no native TypeScript support). Import sources with explicit `.ts` extensions (`../src/scanner.ts`).
-- `test/fixtures/vault/`: version-controlled sample notes for manual verification. They're copied into the gitignored `test-vault/` by `npm run setup-vault`.
+- `test/fixtures/vault/`: version-controlled sample notes for manual verification, including `Checklist.md` and an `Excluded/` folder. They're copied into the gitignored `test-vault/` by `npm run setup-vault`, which also seeds the plugin's settings to exclude that folder.
 - `docs/design.md`: the spec.
 - `styles.css`: theme variables only.
 - `manifest.json`, `versions.json`, `version-bump.mjs`, `.npmrc`, `scripts/`, `.github/workflows/`: release tooling, copied from the sibling `obsidian-link-tooltip` repo and working the same way.
 
 ## Commands
+
+The `Makefile` wraps these for the user (`make` lists them: `make check`, `make vault`, `make open`, `make deploy VAULT=…`, `make release BUMP=…`). Keep it in sync when adding an npm script.
 
 - `npm run dev`: esbuild watch.
 - `npm run build`: typecheck (`tsc`), lint (`eslint`), then the production bundle. **This is the gate**: run it before calling a change done.

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-external-link-autocomplete",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"private": true,
 	"description": "Suggest external links already used in the vault while typing a Markdown link in Obsidian.",
 	"main": "main.js",

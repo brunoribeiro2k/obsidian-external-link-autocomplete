@@ -1,0 +1,10 @@
+{
+	"id": "external-link-autocomplete",
+	"name": "External Link Autocomplete",
+	"version": "0.0.1",
+	"minAppVersion": "1.8.7",
+	"description": "Suggests external links you have already used as you type a Markdown link.",
+	"author": "Bruno Ribeiro",
+	"authorUrl": "https://github.com/brunoribeiro2k",
+	"isDesktopOnly": false
+}

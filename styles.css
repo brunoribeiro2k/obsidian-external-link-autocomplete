@@ -1,0 +1,6 @@
+/*
+ * External Link Autocomplete.
+ *
+ * Rows reuse core's suggestion classes; anything added here must use theme
+ * variables only (no hardcoded colors). See docs/design.md, "Popup layout".
+ */

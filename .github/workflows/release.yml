@@ -5,14 +5,10 @@ name: Release
 # yet, this builds the plugin, pushes the matching tag, and creates a draft
 # release with the assets. Idempotent — pushes that don't change the version
 # (or re-runs) are a no-op.
-#
-# The push trigger is disabled until the first release: manifest.json starts at
-# 0.0.1 with no release, so any push would otherwise draft one. Restore it when
-# 0.0.1 is ready to ship.
 on:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:

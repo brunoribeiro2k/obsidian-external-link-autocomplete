@@ -13,7 +13,7 @@ Design doc for a community plugin that autocompletes external Markdown links as 
 	4. **Rank by distinct notes, not raw occurrences.** One note that repeats a link 50 times shouldn't dominate.
 	5. **Prefix beats fuzzy.** Show prefix matches before fuzzy ones, whatever their frequency. Otherwise ranking feels random.
 - **MVP:** in-memory index, trigger, native-looking popup, accept, and settings for min chars, ranking, exclusions, ignore list and multi-URL behavior. Title fetching, domain grouping and clipboard capture come later.
-- **Biggest unknowns:** (a) which suggester wins when several match, since that's undocumented; (b) whether `CachedMetadata.links` includes `http` links. Settle both with a throwaway build before writing the real thing.
+- **The two big unknowns are settled** (M0, by reading Obsidian 1.14.4's bundled `app.js`): (a) suggesters run in a list, core's four first, then plugins in registration order, and the first `onTrigger` that returns non-null wins; (b) `CachedMetadata.links` does **not** include `http(s)` Markdown links, so the scanner stays. See [Conflicts](#conflicts-with--and-other-suggesters) and [Scanner](#scanner).
 
 ## Prior art and why not extend an existing plugin
 
@@ -86,7 +86,7 @@ Match the native `[[` suggester exactly. Subclass `EditorSuggest` and render int
 - **Secondary line:** host, then a muted `›`, then a path that's middle-ellipsized to one line. Never show the raw full URL; drop `https://` and `www.`. On desktop the full URL goes in the row's `title` tooltip.
 - **Aux (right):** an optional muted "3 notes" count, off by default.
 - **Footer:** key hints through `setInstructions` (since 0.13.0, per [EditorSuggest](https://docs.obsidian.md/Reference/TypeScript+API/EditorSuggest)). Hide it on mobile.
-- **Row cap:** set `limit` (documented on the same page) to about 8 on desktop and 5 on mobile.
+- **Row cap:** set `limit` (documented on the same page) to 8 on desktop and 5 on mobile.
 - **Styling:** reuse core's suggestion classes (`suggestion-content`, `suggestion-title`, `suggestion-note`, `suggestion-aux`, `suggestion-highlight`, `mod-complex`). These are **not documented API**; they're simply what core renders. Confirm them in devtools on the target version. Any extra CSS uses only theme variables (`--text-muted`, `--text-faint`, `--font-ui-smaller`, `--size-4-1`) and no hardcoded colors, as the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines) require ("No hardcoded styling").
 - **Matching row heights:** keep rows the same height and the text single-line, so the list doesn't jump around as you type.
 
@@ -103,7 +103,7 @@ Match the native `[[` suggester exactly. Subclass `EditorSuggest` and render int
 
 - **↑/↓** navigate, and **Enter** accepts. The base class provides both.
 - **Tab** also accepts, as an opt-out setting. Register it on the suggester's `scope` ([PopoverSuggest.scope](https://docs.obsidian.md/Reference/TypeScript+API/PopoverSuggest)), which is only active while the popup is open, so list indentation with Tab is unaffected when no popup is showing.
-- **Esc** dismisses and leaves the typed text alone. After an Esc, don't reopen at the same `[` until the cursor leaves it, so a dismissal sticks.
+- **Esc** dismisses and leaves the typed text alone. After an Esc, don't reopen at the same `[` until the cursor leaves it, so a dismissal sticks. Esc is handled by `PopoverSuggest` internally, so the suggester overrides the public `close()` instead: any close that isn't an accept records the `[` as dismissed.
 - **Shift+Enter** (later): insert just the text without the URL, as an escape hatch.
 - Typing `]` followed by `(`, or moving the cursor out of the bracket, closes the popup silently.
 
@@ -113,7 +113,7 @@ Match the native `[[` suggester exactly. Subclass `EditorSuggest` and render int
 |---|---|---|
 | `[abc|` | Yes, query `abc` | Replace `[abc` → `[text](url)` |
 | `[abc|]` (auto-paired) | Yes, query `abc` | Replace `[abc]` → `[text](url)` |
-| `[ab|c]` | Yes, query `ab` | Replace the whole `[abc]`. Whether `c` should join the query is an open question |
+| `[ab|c]` | Yes, query `ab` | Replace the whole `[abc]` (everything up to the next `]` without another bracket in between). Whether `c` should join the query is an open question |
 | `[abc]|` | No | — |
 | `[abc|](…)` | No (existing link) | — |
 | `[[abc|`, `![abc|`, `[^abc|`, `- [ |]` | No | — |
@@ -137,53 +137,61 @@ Match the native `[[` suggester exactly. Subclass `EditorSuggest` and render int
 ### Modules
 
 ```
-main.ts       Plugin lifecycle, event wiring, settings load/save
-scanner.ts    pure: (text, skipRanges) → Occurrence[]        no 'obsidian' import
-trigger.ts    pure: (lineText, ch) → {start, end, query}|null no 'obsidian' import
-ranking.ts    pure: (query, Aggregate[], mode) → Suggestion[] no 'obsidian' import
-index.ts      LinkIndex: per-file contributions + aggregates + prefix array
+main.ts       Plugin lifecycle, event wiring, full scan, settings load/save
+text.ts       pure: fold, normUrl, stripMarkdown, URL display and insertion helpers
+scanner.ts    pure: (text, skipRanges) → Occurrence[]
+trigger.ts    pure: (lineText, ch) → {start, end, query} | null
+ranking.ts    pure: (query, entries, options) → Suggestion[]
+index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list filter
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
-settings.ts   PluginSettingTab + defaults
+settings.ts   Declarative PluginSettingTab + defaults
 ```
 
-The three pure modules hold all the logic that can go wrong, and they're unit-testable in plain Node.
+Every module except `main`, `suggest` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
 
 ### Data model
 
 ```ts
-interface Occurrence { text: string; url: string }
+interface StoredPair { text: string; url: string; key: string; urlKey: string }
 
 interface FileEntry {                       // Map<path, FileEntry>
 	mtime: number
-	pairs: Map<string, Occurrence>          // key = fold(text) + "\u0000" + normUrl(url); deduped per note
+	pairs: StoredPair[]                     // distinct by key + urlKey: deduped per note
 }
 
-interface UrlStat { url: string; notes: number; lastUsed: number }
+interface UrlStat {                         // one URL under one text
+	paths: string[]                         // parallel arrays, one slot per note:
+	texts: string[]                         // the note's spelling of the text
+	urls: string[]                          // and of the URL
+}
 
-interface Aggregate {                       // Map<fold(text), Aggregate>
-	display: string                         // most frequent original casing
+class Aggregate {                           // Map<key = fold(stripMarkdown(text)), Aggregate>
 	urls: Map<string, UrlStat>              // keyed by normUrl
+	summary(): { text, display, urls: { url, notes, lastUsed }[] }  // lazy, cached until the next change
 }
 ```
 
 - **Per-file contributions are the source of truth.** An update subtracts the file's old pairs and adds the new ones, so it costs O(links in that file), not O(vault).
+- **The inserted text and URL are the most common spellings** across the notes that use the pair. `display` is that text with Markdown stripped.
+- **Parallel arrays, not maps,** because almost every URL has one note, and a `Map` per URL costs several times more memory. Arrays are created at their exact size for the same reason.
+- **Scanned strings are copied** (`detach` in the scanner). Engines may implement `slice` as a view into the parent string, and the index would then keep every scanned note body alive. Measured: 105 MB against 59 MB on the stress set.
 - **`fold(text)`:** NFKC, lowercase, whitespace collapsed, and diacritics stripped (NFD followed by removing combining marks). This is for matching only; the original casing is kept for display and insertion.
 - **`normUrl`** is used for dedupe only: lowercase the scheme and host, drop a trailing `/` on the path. The original string is what gets inserted. Queries and fragments are kept, because they're often meaningful.
 - **`notes`** is the number of distinct notes containing the pair. **`lastUsed`** is the max `mtime` of those notes. That's a proxy, since no real per-link timestamp exists. The proxy is honest enough: recently touched notes are what you've been working with.
-- **The prefix structure** is a sorted array of folded keys that's rebuilt lazily after a batch of changes. A binary search finds the prefix range in O(log n), and only a bounded candidate set (about 200) gets fuzzy-scored.
+- **No prefix structure (yet).** A query is a linear pass over the folded keys with `startsWith`/`indexOf`, which measured under 5 ms for 48k keys (see [Performance](#performance-measured)). Fuzzy matching only runs when the stricter tiers leave free rows, and stops after 200 fuzzy candidates. A sorted array with binary search is the next step if real vaults need it.
 
 ### Scanner
 
 A single pass per line, skipping ranges from the cache:
 
-1. Skip lines inside `code` sections and `frontmatterPosition` (both are on [CachedMetadata](https://docs.obsidian.md/Reference/TypeScript+API/CachedMetadata)). Track inline backtick spans in the scanner itself.
+1. Skip lines inside `code` sections and `frontmatterPosition` (both are on [CachedMetadata](https://docs.obsidian.md/Reference/TypeScript+API/CachedMetadata)). Track inline backtick spans in the scanner itself. When a file has no cache yet, `fallbackSkipRanges` finds frontmatter and fenced blocks from the text (not indented code blocks).
 2. Find `[`. Skip it if it's preceded by `!` or `[`, or followed by `^`.
 3. Find the matching `]`, handling nested brackets and `\`-escapes.
 4. Require `(` immediately after it. Read the destination as `<…>`, or as a run with balanced parentheses that stops at whitespace. Allow an optional `"title"` and a closing `)`.
 5. Keep only `http:`/`https:` destinations by default.
 6. Drop empty texts, texts over about 120 characters, and texts on the ignore list. A text that is itself a URL (`[https://x](https://x)`) is kept and indexed like any other link.
 
-**Can `cache.links` replace the scanner?** The `CachedMetadata.links` doc comment lists `[alias](markdown-link)` as an example ([obsidian.d.ts](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts), [LinkCache](https://docs.obsidian.md/Reference/TypeScript+API/LinkCache)). It doesn't say whether `http(s)` destinations are included. Community plugins that collect external links appear to scan the text themselves, which suggests they're not, but **this is unverified**. I couldn't test it in this vault (Dataview JS is disabled). Test it on day one: if they are included, `cache.links` plus `displayText` and `position` replaces steps 2–4 and removes most of the parsing risk.
+**Can `cache.links` replace the scanner? No (settled in M0).** The `CachedMetadata.links` doc comment lists `[alias](markdown-link)` as an example ([obsidian.d.ts](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts), [LinkCache](https://docs.obsidian.md/Reference/TypeScript+API/LinkCache)), but Obsidian 1.14.4's metadata parser only turns a Markdown `link` node into a cached internal link when its URL contains no `:` (or starts with `./` or `../`). `https://…` destinations are never in `cache.links`, so the scanner is required.
 
 **Reference-style links come almost free.** `CachedMetadata.referenceLinks` (since 1.8.7) exposes `[google]: https://google.com` definitions with `id` and `link` ([ReferenceLinkCache](https://docs.obsidian.md/Reference/TypeScript+API/ReferenceLinkCache)). Pairing the definitions with their `[text][id]` uses is a cheap post-MVP addition.
 
@@ -202,9 +210,10 @@ All event signatures below are from the official typings ([obsidian.d.ts](https:
 Strategy:
 
 1. **`onload`:** load settings and register the suggester. Nothing else is heavy, which keeps load time low.
-2. **`onLayoutReady`:** run a full scan over `vault.getMarkdownFiles()` using `cachedRead` plus `getFileCache`, in chunks of about 50 files that yield between batches (`await sleep(0)`). No task should exceed about 50 ms. Until the scan finishes, suggestions come from whatever has been indexed so far.
-3. **On `changed`:** a per-path debounce of about 300 ms, then re-scan, diff and patch the aggregates, and mark the prefix array dirty.
-4. **Active-note self-boost:** a link typed seconds ago shouldn't outrank everything. Count it, but cap the recency of the note being edited. This is an open question.
+2. **`onLayoutReady`:** register the events, then run a full scan over `vault.getMarkdownFiles()` using `cachedRead` plus `getFileCache`. The scan yields (`await sleep(0)`) whenever a slice has run for 30 ms. Until it finishes, suggestions come from whatever has been indexed so far. A rebuild (command, button, or an index-affecting settings change, debounced by 1 s) abandons a scan in progress.
+3. **On `changed`:** a per-path debounce of 300 ms, then re-scan and patch the aggregates.
+4. **Folders:** a folder rename re-keys every file under it; a folder delete drops every indexed path under it. Moving a file out of an excluded folder indexes it.
+5. **Active-note self-boost:** a link typed seconds ago shouldn't outrank everything. Count it, but cap the recency of the note being edited. This is an open question; for now the note being edited counts like any other.
 
 ### Persistence
 
@@ -215,38 +224,40 @@ Strategy:
 
 **Decision:** in-memory for the MVP. Measure on the stress vault and on a phone. If the cold scan is over about 3 s on desktop or noticeably slow on mobile, add the cache. Store it versioned (`schemaVersion`), keep only per-file pairs (never aggregates), and discard it on a version mismatch.
 
-### Performance targets (targets, not measurements)
+### Performance (measured)
 
-For a generated 10k-note vault with about 5 external links per note:
+Measured under Node 22 on a desktop (Linux) on a synthetic set: 10k notes of 40 lines with 5 external links each, 48k distinct texts, each with its own URL. That's a worst case for the index, since real links repeat. Not yet measured inside Obsidian or on a phone.
 
-| Metric | Target |
-|---|---|
-| `onTrigger`, per keystroke | < 0.2 ms; return `null` early (typings: "triggered very often (on each keypress)… return `null` as early as possible") |
-| `getSuggestions` | < 5 ms, synchronous |
-| Cold full scan (desktop) | < 3 s, chunked, no long task > 50 ms |
-| Incremental update for one file | < 10 ms |
-| Memory | < 20 MB for 50k distinct pairs; never hold note bodies |
+| Metric | Target | Measured |
+|---|---|---|
+| `findTrigger`, per keystroke | < 0.2 ms | 0.0002 ms |
+| Ranking a query (`getSuggestions`) | < 5 ms, synchronous | 1.4–3 ms for 2+ characters; 4.6 ms for a 1-character query |
+| Cold full scan (scanner + index, no I/O) | < 3 s, no long task > 50 ms | 0.25–0.3 s of CPU, sliced at 30 ms |
+| Incremental update for one file | < 10 ms | 0.03 ms |
+| Index memory | < 20 MB for 50k distinct pairs | 40 MB for 48k distinct texts and URLs; note bodies aren't retained |
 
-Record the measured numbers in the repo and replace these targets with them.
+Memory misses the target on this worst case. It's acceptable on desktop. If it hurts on mobile, the next steps are interning strings shared across pairs and collapsing the per-text `Map` for texts that have a single URL.
+
+**`onTrigger` also ranks.** Obsidian stops at the first suggester whose `onTrigger` returns non-null, even if that suggester then has nothing to show (see [Conflicts](#conflicts-with--and-other-suggesters)). So `onTrigger` runs the query, returns `null` when there are no rows, and hands the rows to `getSuggestions`. That keeps `[` free for other plugins whenever this one has nothing to offer.
 
 ## Ranking
 
 1. **Tier:** exact folded match, then prefix, then word-start prefix (`board` matches "Jira board"), then fuzzy (subsequence). A row from a higher tier always beats one from a lower tier.
-2. **Within a tier:** score = `w_f · log(1 + notes) + w_r · recencyDecay(lastUsed)`, where recency decays with a half-life of about 90 days.
+2. **Within a tier:** score = `w_f · log(1 + notes) + w_r · recencyDecay(lastUsed)`, where recency decays with a half-life of 90 days. Balanced uses `w_f = w_r = 1`.
 	- **Balanced** (default): both weights apply.
 	- **Frequency:** `w_r = 0`.
 	- **Recency:** `w_f = 0`.
 3. **Ties:** shorter text first, then alphabetical, so ordering stays stable while you type.
-4. **Multiple URLs for one text:** one row per URL, with the URLs ordered by the same score.
+4. **Multiple URLs for one text:** one row per URL, with the URLs ordered by the same score. A text's rows stay together, and the text is ranked by its best URL.
 
 ## Edge cases
 
 | Case | Behavior |
 |---|---|
 | Same text, different URLs | One row per URL, told apart on the secondary line. The setting can collapse them to "most recent" or "most used". |
-| URL changed over time | Both are kept. Recency surfaces the new one, and the older row gets a muted "older" aux tag when a newer URL exists for the same text. |
+| URL changed over time | Both are kept. Recency surfaces the new one. (M2: the older row gets a muted "older" aux tag when a newer URL exists for the same text.) |
 | Autolinks `<https://…>` | Not indexed (no text to key on). |
-| Bare URLs | Off by default. If enabled, key them on host plus last path segment (e.g. `github.com/obsidianmd`), insert as `[<that key>](url)`, and show them below text links. |
+| Bare URLs | Not indexed in the MVP. Later, behind an off-by-default setting: key them on host plus last path segment (e.g. `github.com/obsidianmd`), insert as `[<that key>](url)`, and show them below text links. |
 | Reference-style `[text][id]` | MVP: not indexed. Later: via `referenceLinks`. |
 | Tables, callouts, lists, blockquotes | Indexed normally; the scanner skips the line prefixes `>`, `-`, `1.`, `|`. Inserting inside a table escapes `|`. Triggering inside a callout works the same as in a normal line. |
 | Markdown inside the text (`[**x**](…)`) | Keep the raw text for insertion, and match and display a stripped version. |
@@ -257,22 +268,24 @@ Record the measured numbers in the repo and replace these targets with them.
 | Ignore list | Texts (`here`, `link`, `this`, `source`, `click here`) and domain patterns. Applied at index time. |
 | Text is the URL (`[https://x](https://x)`) | Indexed like any other aliased link; the URL text is matched and inserted as is. |
 | Empty text, images, non-http schemes | Skipped. |
-| Huge single note (logs, exports) | Pairs are deduped per note, so it counts once per pair. A setting can skip files over N KB. |
+| Huge single note (logs, exports) | Pairs are deduped per note, so it counts once per pair. (Later, if needed: a setting to skip files over N KB.) |
 
 ## Settings
 
 | Setting | Default | Notes |
 |---|---|---|
 | Minimum characters | 2 | 1–5 |
-| Ranking | Balanced | Balanced / Frequency / Recency |
-| When a text has several URLs | Show all | Show all / Only most recent / Only most used |
-| Accept with Tab | On | Enter always accepts |
-| Excluded folders | — | Folder suggester; paths go through `normalizePath()` |
-| Ignored link texts | short built-in list | Editable |
-| Ignored domains | — | Glob-like (`*.internal.example.com`) |
-| Index bare URLs | Off | Experimental |
+| Ranking | Balanced | Balanced / Most used / Most recent |
+| When a text has several links | Show all | Show all / Only most recent / Only most used |
+| Accept with tab | On | Enter always accepts |
 | Show note count | Off | Aux column |
-| Rebuild index | button + command | No default hotkey |
+| Ignored link texts | here, link, this, source, click here | One per line, folded like queries |
+| Ignored domains | — | One per line, glob-like (`*.internal.example.com`); `*` matches any run of characters |
+| Rebuild index | action row + command | No default hotkey |
+| Excluded folders | — | A list with a folder picker per row; paths go through `normalizePath()` |
+| Index bare URLs | — | Not in the MVP (see [Edge cases](#edge-cases)) |
+
+The tab uses the declarative settings API (`getSettingDefinitions`, Obsidian 1.13+), so every setting appears in Obsidian's settings search. That's why `minAppVersion` is 1.13.0. Excluded folders is the only list with a heading; the guideline below allows it since it's a separate section.
 
 UI follows the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines): "Use Sentence case in UI", "Only use headings under settings if you have more than one section", "Avoid 'settings' in settings headings", `setHeading()` instead of HTML headings, and "Avoid setting a default hotkey for commands".
 
@@ -284,10 +297,11 @@ UI follows the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Pl
 - `onTrigger(cursor, editor, file: TFile | null)` returns `EditorSuggestTriggerInfo | null`, with `null` meaning "not supposed to be triggered". It runs on every keypress ([EditorSuggest](https://docs.obsidian.md/Reference/TypeScript+API/EditorSuggest); the signature with `file: TFile | null` dates from 1.1.13 in the typings).
 - There is **no** documented priority or sort order for `EditorSuggest`s.
 
-**What is not documented (treat as unknown):**
+**What is not documented, but observed (M0, Obsidian 1.14.4 `app.js`):**
 
-- **Arbitration between suggesters.** A [forum thread](https://forum.obsidian.md/t/help-with-hot-reload-plugin-for-editorsuggest/94678) reports that another suggester "is placed ahead" of a plugin's and that order changed which one ran. That's consistent with "registration order, first non-null wins", but it isn't a contract.
-- **Whether core's `[[` suggester sits in the same list.** It's commonly reached through the private `app.workspace.editorSuggest`, which isn't in the public typings.
+- **Arbitration: an ordered list, first non-null `onTrigger` wins.** The private manager (`app.workspace.editorSuggest`) creates four core suggesters in its constructor, and `registerEditorSuggest` appends plugins after them (`suggests.push`). On each keypress it walks the list and stops at the first suggester whose `trigger()` returns true, which happens whenever `onTrigger` returns non-null, **even if `getSuggestions` then returns nothing** (an empty list just closes the popup). This matches the [forum thread](https://forum.obsidian.md/t/help-with-hot-reload-plugin-for-editorsuggest/94678) report. It's still not a contract.
+- **Core's four:** the link suggester (`[[`, active while the last `[[` on the line comes after the last `]`), tags (`#`), footnotes (`[^`, via `/(?:^|[^\[])(\[\^)([^\]]*)$/`), and one that triggers on `=`. They always run before any plugin. None of them triggers on a plain `[`, so there's no overlap with this plugin.
+- **Consequence:** this plugin's `onTrigger` returns non-null only when it has rows to show, so it never blocks a later plugin on a `[` it can't use.
 
 **Defensive design:**
 
@@ -312,10 +326,10 @@ UI follows the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Pl
 - **Ranking:** tier ordering, all three modes, distinct-note counting, tie stability, a fold/diacritic case, multi-URL ordering.
 - **Index:** add, modify, rename and delete sequences leave the aggregates equal to a full rebuild (a property-style test that compares incremental results against a full scan).
 
-### Manual test vault (committed under `test-vault/`)
+### Manual test vault (generated into the gitignored `test-vault/`)
 
-- Notes covering each edge-case row, an excluded folder, and a `stress/` folder generated by a script (10k notes).
-- A checklist note listing the expected behavior for each case.
+- `npm run setup-vault` copies the notes in `test/fixtures/vault/` into `test-vault/`, deploys the build, and enables the plugin. The fixtures cover each edge-case row and an `Excluded/` folder; the vault's plugin settings are seeded to exclude it. `-- --stress` also generates a `stress/` folder with 10k notes.
+- `Checklist.md` in the vault lists the expected behavior for each case.
 - A matrix to run before each release: auto-pair on and off, Live Preview and Source mode, light and dark theme plus one popular community theme, desktop and phone, and with Inline Link Suggestions and Various Complements enabled.
 
 ### Community-plugin review requirements
@@ -338,17 +352,17 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 
 ## Milestones
 
-### M0: spike (half a day)
+### M0: spike — done
 
-- A throwaway `EditorSuggest` on `[` that logs which suggester wins with core and two popular plugins.
-- Check whether `cache.links` contains `http` links.
-- Confirm the core suggestion CSS classes render correctly in the popup.
+- Answered from Obsidian 1.14.4's bundled `app.js` instead of a throwaway build: suggester precedence (see [Conflicts](#conflicts-with--and-other-suggesters)) and `cache.links` (see [Scanner](#scanner)).
+- Still to confirm in the test vault: the core suggestion CSS classes render correctly in the popup, and the behavior alongside popular suggester plugins.
 
-### M1: MVP
+### M1: MVP — implemented, pending manual verification
 
-- Scanner (or `cache.links`, depending on M0), in-memory index, incremental updates, trigger, ranking, native popup, accept with cursor handling, Tab/Enter/Esc.
-- Settings: min chars, ranking mode, multi-URL behavior, Tab accept, excluded folders, ignore lists, rebuild.
-- Unit tests, the test vault, ESLint + CI, and a README with the privacy statement. First release and submission.
+- Scanner, in-memory index, incremental updates, trigger, ranking, native popup, accept with cursor handling, Tab/Enter/Esc.
+- Settings: min chars, ranking mode, multi-URL behavior, Tab accept, note count, excluded folders, ignore lists, rebuild.
+- Unit tests, the test vault and its checklist, ESLint + CI, and a README with the privacy statement.
+- Left: walk the test-vault checklist in Obsidian (desktop and phone), then the first real release and submission.
 
 ### M2: polish
 
@@ -363,8 +377,8 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 
 ## Open questions
 
-1. Does `CachedMetadata.links` include `http(s)` Markdown links? (M0)
-2. How does Obsidian arbitrate between several `EditorSuggest`s, and is core's `[[` one of them? (M0, empirical only)
+1. ~~Does `CachedMetadata.links` include `http(s)` Markdown links?~~ No (M0, see [Scanner](#scanner)).
+2. ~~How does Obsidian arbitrate between several `EditorSuggest`s, and is core's `[[` one of them?~~ Ordered list, core first, first non-null `onTrigger` wins (M0, see [Conflicts](#conflicts-with--and-other-suggesters)).
 3. Insert the stored casing or the casing the user typed?
 4. With the cursor in `[ab|c]`, should `c` be part of the query?
 5. How much should links in the note being edited count?
@@ -383,7 +397,7 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 | Stale URLs get suggested | Wrong link inserted | Recency ranking, URL always visible, "older" hint |
 | Popups while writing prose with brackets | Annoyance, so the plugin gets disabled | Min length, ignore list, Esc sticks, pause command |
 | Review rejection | Delayed listing | Official ESLint plugin in CI from day one |
-| `cache.links` behavior differs across versions | Missing or duplicated pairs | Keep the scanner as the fallback and a test oracle |
+| Suggester precedence observed in 1.14.4 changes | Popup stops appearing | Only claim `[` with rows to show; re-check `app.js` on major releases |
 
 ## Sources
 

@@ -4,3 +4,16 @@
  * Rows reuse core's suggestion classes; anything added here must use theme
  * variables only (no hardcoded colors). See docs/design.md, "Popup layout".
  */
+
+/* Keep every row one line tall so the list doesn't jump while typing. */
+.external-link-autocomplete-item .suggestion-title,
+.external-link-autocomplete-url {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.external-link-autocomplete-separator {
+	color: var(--text-faint);
+	margin: 0 var(--size-4-1);
+}

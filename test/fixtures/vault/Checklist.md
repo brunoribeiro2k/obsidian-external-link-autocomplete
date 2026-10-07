@@ -68,6 +68,9 @@ Use `Link variants.md`. Commit or copy `test-vault/` first if you want to repeat
 - [ ] Applying shows "Updated N links in M notes."; the title `"Team board"` survives, the trailing-slash URL is now written as typed, the table cell is intact, and the code block is untouched.
 - [ ] With `Link variants.md` open and unsaved typing in it, applying keeps that typing, and Ctrl+Z in that note undoes the edit there.
 - [ ] Changing only the URL rewrites the destinations and keeps the texts.
+- [ ] In the link browser, right-clicking the Jira URL group (grouped by URL) offers "Edit link across vault", opening the modal on its most used text; right-clicking the "Sprint board" row under it opens the modal on `Sprint board`.
+- [ ] After applying, the browser updates on its own, and the group no longer shows under "Only inconsistent" once every text is unified.
+- [ ] Mobile: long-pressing a row in the browser opens the same menu.
 
 ## Platforms
 

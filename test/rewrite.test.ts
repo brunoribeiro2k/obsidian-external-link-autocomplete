@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pairFilter } from "../src/index.ts";
-import { applyChanges, isValidLink, linkAt, planRewrite, type RewriteSpec } from "../src/rewrite.ts";
+import { appliedLinks, applyChanges, isValidLink, linkAt, planRevert, planRewrite, type RewriteSpec } from "../src/rewrite.ts";
 import { fallbackSkipRanges } from "../src/scanner.ts";
 
 const spec = (overrides: Partial<RewriteSpec> = {}): RewriteSpec => ({
@@ -87,4 +87,26 @@ test("validates the edited link", () => {
 	assert.ok(!isValidLink("", "https://a.com"));
 	assert.ok(!isValidLink("a]b", "https://a.com"));
 	assert.ok(!isValidLink("a", "ftp://a.com"));
+});
+
+test("reverts a rewrite, including several links per line", () => {
+	const content = 'x\r\n[a](https://aaa.com "T") [b](https://aaa.com) [a](https://aaa.com)\r\ny';
+	const changes = planRewrite(content, [], spec({ allTexts: true, text: "longer", url: "https://new.com" }));
+	const rewritten = applyChanges(content, changes);
+	assert.equal(rewritten, 'x\r\n[longer](https://new.com "T") [longer](https://new.com) [longer](https://new.com)\r\ny');
+	const applied = appliedLinks(content, changes);
+	const { changes: revert, skipped } = planRevert(rewritten, applied);
+	assert.equal(skipped, 0);
+	assert.equal(applyChanges(rewritten, revert), content);
+});
+
+test("leaves links edited since the rewrite alone", () => {
+	const content = "[a](https://aaa.com) [a](https://aaa.com)";
+	const changes = planRewrite(content, [], spec());
+	const rewritten = applyChanges(content, changes);
+	const edited = rewritten.replace("[a2](https://aaa.com) ", "[mine](https://aaa.com) ");
+	const { changes: revert, skipped } = planRevert(edited, appliedLinks(content, changes));
+	assert.equal(skipped, 1);
+	assert.equal(applyChanges(edited, revert), "[mine](https://aaa.com) [a](https://aaa.com)");
+	assert.equal(planRevert("moved\n" + rewritten, appliedLinks(content, changes)).skipped, 2);
 });

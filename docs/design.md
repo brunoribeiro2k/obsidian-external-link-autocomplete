@@ -152,9 +152,9 @@ Renames a link's text or changes its URL in every note using it, after a preview
 - **Entry points:** the [link browser](#link-browser)'s row menus, and "Edit link across vault" in the editor's right-click menu and in the command palette, both only offered with the cursor in an external link outside code and frontmatter. Right-clicking a rendered link (Live Preview, reading view) offers it too: Obsidian's `url-menu` reports only the URL, so the text comes from the cursor when it's on that link, or from the URL's most used text.
 - **Modal:** text and URL fields, prefilled from the link. Every matched link becomes exactly `[text](url)` as typed, which also tidies URL spellings that only differ by a trailing `/` or the host's case.
 - **What matches:** by default, the pair: the same folded text and normalized URL, as in the index. "Also update other texts for this URL" (off by default, listing those texts with note counts) widens it to every link to that URL. Links the ignore lists drop are never edited, so `[here](…)` stays as written.
-- **Preview:** the affected notes with each link's line, a count, and the resulting link. The confirm button states the count ("Update 4 links"), uses Obsidian's destructive style, and sits under "This can't be undone." An empty or invalid result disables it.
+- **Preview:** the affected notes with each link's line, a count, and the resulting link. The confirm button states the count ("Update 4 links"), uses Obsidian's destructive style, and sits under a note saying how to undo it. An empty or invalid result disables it.
 - **Writing:** candidates come from the index, then each note is re-scanned when applying, so offsets are never stale and a note edited since the preview is handled as it is now. Only the text and destination are replaced, keeping titles and spacing; `|` is escaped in table rows. Notes open in an editor are edited through `Editor.transaction`, so unsaved typing survives and Ctrl+Z works there. The rest go through `Vault.process`, never `Vault.modify`. Skip ranges are the union of the metadata cache's and the text-derived ones, because the cache can lag behind an editor, and skipping too much only leaves a link unedited.
-- **Undo:** none across notes yet ([#6](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/6)).
+- **Undo:** "Undo last link edit" ([#6](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/6)), offered only while there's an edit to undo. Each edit records every changed link's source before and after, and where it ended up; the record lives in memory until Obsidian closes, and follows renamed notes. Undoing puts back each link still on its line exactly as the edit left it, taking the closest unclaimed copy when other edits on the line moved it, and reports how many were skipped because they changed since. Open notes also have their own Ctrl+Z. The modal's warning says so instead of "This can't be undone."
 
 ## Architecture
 
@@ -396,7 +396,7 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 ### M2: polish
 
 - [Link browser](#link-browser) (#3).
-- [Editing a link across the vault](#editing-a-link-across-the-vault) (#4).
+- [Editing a link across the vault](#editing-a-link-across-the-vault) (#4), with its row menus in the link browser (#5) and undo (#6).
 - Persisted cache (if M1 measurements call for it), reference-style links, "older URL" hint, Shift+Enter text-only insert, pause command.
 
 ### Later

@@ -57,7 +57,7 @@ Manual checks for what unit tests can't cover. Type in a scratch note; each line
 
 ## Edit link across vault
 
-Use `Link variants.md`. Commit or copy `test-vault/` first if you want to repeat these.
+Use `Link variants.md`. "Undo last link edit" (below) resets it, or run `make vault` again.
 
 - [ ] With the cursor in `[jira](…)`, "Edit link across vault" shows in the command palette and the right-click menu; with the cursor in plain text or in the code block, it doesn't.
 - [ ] Right-clicking the rendered "Sprint board" link in Live Preview offers it too.
@@ -71,6 +71,9 @@ Use `Link variants.md`. Commit or copy `test-vault/` first if you want to repeat
 - [ ] In the link browser, right-clicking the Jira URL group (grouped by URL) offers "Edit link across vault", opening the modal on its most used text; right-clicking the "Sprint board" row under it opens the modal on `Sprint board`.
 - [ ] After applying, the browser updates on its own, and the group no longer shows under "Only inconsistent" once every text is unified.
 - [ ] Mobile: long-pressing a row in the browser opens the same menu.
+- [ ] "Undo last link edit" is missing from the palette until an edit is applied. Running it shows "Reverted N links in M notes." and every note is back as it was, title and table included; the command then disappears again.
+- [ ] Apply an edit, change one of the edited links by hand in a closed note, then undo: that link stays as you wrote it, and the notice says 1 link was left as is.
+- [ ] Apply an edit, rename one of the edited notes, then undo: its links are reverted too.
 
 ## Platforms
 

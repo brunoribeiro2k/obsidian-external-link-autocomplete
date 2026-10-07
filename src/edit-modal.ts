@@ -77,7 +77,10 @@ export class EditLinkModal extends Modal {
 		}
 
 		contentEl.append(this.summaryEl, this.listEl);
-		contentEl.createDiv({ cls: "external-link-edit-warning", text: "This can't be undone." });
+		contentEl.createDiv({
+			cls: "external-link-edit-warning",
+			text: "Notes are saved right away. Until you close Obsidian, \"Undo last link edit\" reverts the links that weren't edited since.",
+		});
 		new Setting(contentEl)
 			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
 			.addButton((button) => {

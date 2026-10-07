@@ -35,3 +35,26 @@
 	margin: var(--size-4-2) 0;
 	width: 100%;
 }
+
+/* Edit link across vault. */
+.external-link-edit-summary {
+	margin: var(--size-4-3) 0 var(--size-4-2);
+	color: var(--text-muted);
+}
+
+.external-link-edit-list {
+	max-height: 40vh;
+	overflow-y: auto;
+}
+
+.external-link-edit-note-title {
+	font-weight: var(--font-semibold);
+	margin-top: var(--size-4-2);
+}
+
+.external-link-edit-more,
+.external-link-edit-warning {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin-top: var(--size-4-2);
+}

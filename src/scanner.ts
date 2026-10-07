@@ -20,6 +20,11 @@ export interface Occurrence {
 	start: number;
 	/** Column just after the closing `)`. */
 	end: number;
+	/** Column of the `]` closing the text, which starts at `start + 1`. */
+	textEnd: number;
+	/** Columns of the destination as written, `<…>` included. */
+	urlStart: number;
+	urlEnd: number;
 }
 
 /** Inclusive zero-based line ranges the scanner must not look at. */
@@ -106,7 +111,16 @@ function scanBracket(content: string, start: number, line: number, out: Occurren
 		!trimmed.includes("![") &&
 		isHttpUrl(destination.url)
 	) {
-		out.push({ text: detach(trimmed), url: detach(destination.url), line, start, end: destination.end });
+		out.push({
+			text: detach(trimmed),
+			url: detach(destination.url),
+			line,
+			start,
+			end: destination.end,
+			textEnd: close,
+			urlStart: destination.urlStart,
+			urlEnd: destination.urlEnd,
+		});
 	}
 	return destination.end;
 }
@@ -141,10 +155,15 @@ function matchBracket(content: string, start: number): number {
 
 /**
  * Parses `url)`, `<url>)`, `url "title")` and friends, starting just after
- * the `(`. Returns the URL and the index after the closing `)`, or null.
+ * the `(`. Returns the URL, where it was written, and the index after the
+ * closing `)`, or null.
  */
-function parseDestination(content: string, from: number): { url: string; end: number } | null {
+function parseDestination(
+	content: string,
+	from: number,
+): { url: string; urlStart: number; urlEnd: number; end: number } | null {
 	let i = skipSpaces(content, from);
+	const urlStart = i;
 	let url: string;
 	if (content[i] === "<") {
 		const close = content.indexOf(">", i + 1);
@@ -171,6 +190,7 @@ function parseDestination(content: string, from: number): { url: string; end: nu
 		if (depth !== 0) return null;
 		url = content.slice(start, i);
 	}
+	const urlEnd = i;
 
 	i = skipSpaces(content, i);
 	const opener = content[i];
@@ -184,7 +204,7 @@ function parseDestination(content: string, from: number): { url: string; end: nu
 		i = skipSpaces(content, j + 1);
 	}
 	if (content[i] !== ")") return null;
-	return { url: url.trim(), end: i + 1 };
+	return { url: url.trim(), urlStart, urlEnd, end: i + 1 };
 }
 
 function skipSpaces(content: string, from: number): number {

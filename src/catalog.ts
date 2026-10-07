@@ -6,8 +6,7 @@
  * grouped by text, it lists the URLs one text points at.
  */
 
-import type { PairStat } from "./index.ts";
-import type { Occurrence } from "./scanner.ts";
+import type { LinkPair, PairStat } from "./index.ts";
 import { fold, mostFrequent, normUrl, stripMarkdown } from "./text.ts";
 
 export type Grouping = "url" | "text";
@@ -107,8 +106,8 @@ function compareText(a: string, b: string): number {
 }
 
 /** Whether a scanned link is an instance of the variant. */
-export function isVariantOf(occurrence: Occurrence, variant: Pick<CatalogVariant, "key" | "urlKey">): boolean {
-	return normUrl(occurrence.url) === variant.urlKey && fold(stripMarkdown(occurrence.text)) === variant.key;
+export function isVariantOf(pair: LinkPair, variant: Pick<CatalogVariant, "key" | "urlKey">): boolean {
+	return normUrl(pair.url) === variant.urlKey && fold(stripMarkdown(pair.text)) === variant.key;
 }
 
 /**

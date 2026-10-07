@@ -55,6 +55,20 @@ Manual checks for what unit tests can't cover. Type in a scratch note; each line
 - [ ] Add a link to a note; it appears in the browser within a second or two, without collapsing what's expanded.
 - [ ] Mobile: the view opens in the right drawer and lines are tappable.
 
+## Edit link across vault
+
+Use `Link variants.md`. Commit or copy `test-vault/` first if you want to repeat these.
+
+- [ ] With the cursor in `[jira](…)`, "Edit link across vault" shows in the command palette and the right-click menu; with the cursor in plain text or in the code block, it doesn't.
+- [ ] Right-clicking the rendered "Sprint board" link in Live Preview offers it too.
+- [ ] The modal is prefilled with `jira` and the URL, and says "Nothing to change." with the button disabled.
+- [ ] Typing `Jira board` lists the `[jira](…)` line ("1 link in 1 note"), and the button reads "Update 1 link" in the destructive style.
+- [ ] "Also update other texts for this URL" lists "Jira board", "Sprint board" and "JIRA BOARD" with counts. Turning it on adds the "Sprint board" and "JIRA BOARD" lines; links already written `[Jira board](…)` exactly aren't listed; `[here](…)` never is.
+- [ ] Clearing the text, or typing `a]b` or a non-http URL, disables the button with an explanation.
+- [ ] Applying shows "Updated N links in M notes."; the title `"Team board"` survives, the trailing-slash URL is now written as typed, the table cell is intact, and the code block is untouched.
+- [ ] With `Link variants.md` open and unsaved typing in it, applying keeps that typing, and Ctrl+Z in that note undoes the edit there.
+- [ ] Changing only the URL rewrites the destinations and keeps the texts.
+
 ## Platforms
 
 - [ ] Live Preview and Source mode.

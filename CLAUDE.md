@@ -34,7 +34,7 @@ Don't re-litigate these without being asked:
 
 ## Layout
 
-- `src/main.ts`: plugin entry (bundled to `main.js`), with `suggest`, `view`, `settings` and the pure modules `text`, `scanner`, `trigger`, `ranking`, `index` and `catalog` next to it (see the design doc's module table). The pure modules must stay **pure**: no `obsidian` import, so they're unit-testable under Node.
+- `src/main.ts`: plugin entry (bundled to `main.js`), with `suggest`, `view`, `edit-modal`, `settings` and the pure modules `text`, `scanner`, `trigger`, `ranking`, `index`, `catalog` and `rewrite` next to it (see the design doc's module table). The pure modules must stay **pure**: no `obsidian` import, so they're unit-testable under Node.
 - `test/*.test.ts`: `node --test` unit tests, with TypeScript loaded through `tsx` (the local Node build has no native TypeScript support). Import sources with explicit `.ts` extensions (`../src/scanner.ts`).
 - `test/fixtures/vault/`: version-controlled sample notes for manual verification, including `Checklist.md` and an `Excluded/` folder. They're copied into the gitignored `test-vault/` by `npm run setup-vault`, which also seeds the plugin's settings to exclude that folder.
 - `docs/design.md`: the spec.
@@ -60,7 +60,7 @@ These follow the Obsidian community-plugin review. The official `eslint-plugin-o
 - **Theme-aware styling.** Reuse core's suggestion classes, and use CSS variables, never hardcoded colors. The popup must look native (see the doc's "Popup layout" and its list of what looks dated).
 - **Sentence case** in all UI text. No settings heading unless there are several sections, and never the word "settings" in one. No default hotkeys.
 - **No `innerHTML`.** Build DOM with `createEl` / `createDiv` / `createSpan` / `setText`.
-- **`this.app`**, never the global `app`. Insert text through the `Editor` API, never `Vault.modify`. Run user paths through `normalizePath()`.
+- **`this.app`**, never the global `app`. Write to open notes through the `Editor` API, and to other notes (vault-wide link edits) through `Vault.process`; never `Vault.modify`. Run user paths through `normalizePath()`.
 - **Clean teardown.** Register everything through `registerEditorSuggest` / `registerEvent` / `register*` so unload cleans up.
 - **No private internals.** Don't touch `app.workspace.editorSuggest` or other undocumented objects to win suggester precedence.
 - **Mobile-safe.** No Node or Electron APIs in `src/`, and no regex lookbehind.

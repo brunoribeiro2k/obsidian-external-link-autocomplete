@@ -17,3 +17,21 @@
 	color: var(--text-faint);
 	margin: 0 var(--size-4-1);
 }
+
+/* Link browser: core's nav header, tree and search-result classes do the rest. */
+.external-link-browser-search {
+	padding: var(--size-4-1) var(--size-4-2) 0;
+}
+
+.external-link-browser-list {
+	padding: var(--size-4-1) var(--size-4-2);
+}
+
+.external-link-browser .search-result-file-match {
+	cursor: var(--cursor);
+}
+
+.external-link-browser-more {
+	margin: var(--size-4-2) 0;
+	width: 100%;
+}

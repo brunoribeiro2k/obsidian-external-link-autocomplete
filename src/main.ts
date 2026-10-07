@@ -1,7 +1,8 @@
 import { CachedMetadata, Plugin, TAbstractFile, TFile, TFolder } from "obsidian";
+import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { rank, type Suggestion } from "./ranking.ts";
-import { fallbackSkipRanges, scan, type LineRange } from "./scanner.ts";
+import { fallbackSkipRanges, scan, type LineRange, type Occurrence } from "./scanner.ts";
 import {
 	DEFAULT_SETTINGS,
 	ExternalLinkSettingTab,
@@ -9,6 +10,7 @@ import {
 	type SettingsImpact,
 } from "./settings.ts";
 import { ExternalLinkSuggest } from "./suggest.ts";
+import { LINK_BROWSER_VIEW, LinkBrowserView } from "./view.ts";
 
 /** Quiet period before a changed note is re-scanned. */
 const CHANGE_DEBOUNCE_MS = 300;
@@ -19,7 +21,10 @@ const SCAN_SLICE_MS = 30;
 
 export default class ExternalLinkAutocompletePlugin extends Plugin {
 	settings: ExternalLinkSettings = { ...DEFAULT_SETTINGS };
-	private readonly index = new LinkIndex();
+	private readonly index = new LinkIndex(() => {
+		for (const listener of this.indexListeners) listener();
+	});
+	private readonly indexListeners = new Set<() => void>();
 	private keep: (pair: LinkPair) => boolean = () => true;
 	private suggester: ExternalLinkSuggest | null = null;
 	/** Bumped to abandon a full scan in progress. */
@@ -33,6 +38,21 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		this.suggester = new ExternalLinkSuggest(this);
 		this.registerEditorSuggest(this.suggester);
 		this.addSettingTab(new ExternalLinkSettingTab(this.app, this));
+		this.registerView(LINK_BROWSER_VIEW, (leaf) => new LinkBrowserView(leaf, this));
+		this.addCommand({
+			id: "open-link-browser",
+			name: "Open link browser",
+			callback: () => {
+				void this.openLinkBrowser(false);
+			},
+		});
+		this.addCommand({
+			id: "open-link-browser-in-new-tab",
+			name: "Open link browser in new tab",
+			callback: () => {
+				void this.openLinkBrowser(true);
+			},
+		});
 		this.addCommand({
 			id: "rebuild-index",
 			name: "Rebuild link index",
@@ -72,6 +92,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 
 	async saveSettings(impact: SettingsImpact): Promise<void> {
 		await this.saveData(this.settings);
+		if (impact === "browser") return;
 		if (impact === "suggester") {
 			this.applySettings();
 			return;
@@ -97,6 +118,40 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 			limit,
 			now: Date.now(),
 		});
+	}
+
+	/** Groups the index for the link browser. */
+	catalog(options: CatalogOptions): CatalogGroup[] {
+		return buildCatalog(this.index.pairStats(), (path) => this.index.mtime(path), options);
+	}
+
+	/** Runs `listener` after every index update; returns the unsubscribe. */
+	onIndexChange(listener: () => void): () => void {
+		this.indexListeners.add(listener);
+		return () => this.indexListeners.delete(listener);
+	}
+
+	/** Every link in a note, read fresh, with its lines for context. */
+	async scanFile(file: TFile): Promise<{ lines: string[]; occurrences: Occurrence[] }> {
+		const data = await this.app.vault.cachedRead(file);
+		return { lines: data.split(/\r?\n/), occurrences: scan(data, skipRangesFor(data, this.app.metadataCache.getFileCache(file))) };
+	}
+
+	/**
+	 * Reveals the link browser if it's open (in a main tab, when `newTab`),
+	 * or opens it where the settings say, or in a new tab.
+	 */
+	async openLinkBrowser(newTab: boolean): Promise<void> {
+		const { workspace } = this.app;
+		let leaf =
+			workspace.getLeavesOfType(LINK_BROWSER_VIEW).find((open) => !newTab || open.getRoot() === workspace.rootSplit) ??
+			null;
+		if (!leaf) {
+			leaf = newTab || this.settings.browserPlacement === "tab" ? workspace.getLeaf("tab") : workspace.getRightLeaf(false);
+			if (!leaf) return;
+			await leaf.setViewState({ type: LINK_BROWSER_VIEW, active: true });
+		}
+		await workspace.revealLeaf(leaf);
 	}
 
 	/** Whether a line of a note is frontmatter or code, per the metadata cache. */
@@ -132,8 +187,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	}
 
 	private indexContent(file: TFile, data: string, cache: CachedMetadata | null): void {
-		const skip = cache?.sections ? skipRanges(cache) : fallbackSkipRanges(data);
-		const pairs = scan(data, skip).filter(this.keep);
+		const pairs = scan(data, skipRangesFor(data, cache)).filter(this.keep);
 		this.index.setFile(file.path, file.stat.mtime, pairs);
 	}
 
@@ -201,6 +255,11 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		window.clearTimeout(timer);
 		this.changeTimers.delete(path);
 	}
+}
+
+/** Skip ranges from the metadata cache, or worked out from the text without it. */
+function skipRangesFor(data: string, cache: CachedMetadata | null): LineRange[] {
+	return cache?.sections ? skipRanges(cache) : fallbackSkipRanges(data);
 }
 
 /** Code blocks and frontmatter, as inclusive line ranges. */

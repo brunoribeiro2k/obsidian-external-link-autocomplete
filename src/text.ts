@@ -107,6 +107,22 @@ export function stripMarkdown(text: string): string {
 	return out.trim();
 }
 
+/** The most common value; ties go to the lexically smallest, for stability. */
+export function mostFrequent(values: readonly string[]): string {
+	if (values.length === 1) return values[0];
+	const counts = new Map<string, number>();
+	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+	let best = "";
+	let bestCount = -1;
+	for (const [value, count] of counts) {
+		if (count > bestCount || (count === bestCount && value < best)) {
+			best = value;
+			bestCount = count;
+		}
+	}
+	return best;
+}
+
 /** Whether a destination is an `http:` or `https:` URL. */
 export function isHttpUrl(url: string): boolean {
 	return /^https?:\/\/\S/i.test(url);

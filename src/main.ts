@@ -1,7 +1,9 @@
-import { CachedMetadata, Plugin, TAbstractFile, TFile, TFolder } from "obsidian";
+import { CachedMetadata, Editor, MarkdownView, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder } from "obsidian";
 import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.ts";
+import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { rank, type Suggestion } from "./ranking.ts";
+import { applyChanges, linkAt, planRewrite, type LinkChange, type RewriteSpec } from "./rewrite.ts";
 import { fallbackSkipRanges, scan, type LineRange, type Occurrence } from "./scanner.ts";
 import {
 	DEFAULT_SETTINGS,
@@ -10,6 +12,7 @@ import {
 	type SettingsImpact,
 } from "./settings.ts";
 import { ExternalLinkSuggest } from "./suggest.ts";
+import { fold, mostFrequent, normUrl, stripMarkdown } from "./text.ts";
 import { LINK_BROWSER_VIEW, LinkBrowserView } from "./view.ts";
 
 /** Quiet period before a changed note is re-scanned. */
@@ -18,6 +21,13 @@ const CHANGE_DEBOUNCE_MS = 300;
 const SETTINGS_DEBOUNCE_MS = 1000;
 /** The full scan yields to the UI after this much work. */
 const SCAN_SLICE_MS = 30;
+
+/** What a vault-wide link edit would change in one note. */
+export interface RewritePreview {
+	file: TFile;
+	lines: string[];
+	changes: LinkChange[];
+}
 
 export default class ExternalLinkAutocompletePlugin extends Plugin {
 	settings: ExternalLinkSettings = { ...DEFAULT_SETTINGS };
@@ -53,6 +63,40 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 				void this.openLinkBrowser(true);
 			},
 		});
+		this.addCommand({
+			id: "edit-link-across-vault",
+			name: "Edit link across vault",
+			editorCheckCallback: (checking, editor, info) => {
+				const link = this.linkAtCursor(editor, info.file);
+				if (!link) return false;
+				if (!checking) this.openEditLink(link.text, link.url);
+				return true;
+			},
+		});
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu, editor, info) => {
+				const link = this.linkAtCursor(editor, info.file);
+				if (link) this.addEditLinkItem(menu, link.text, link.url);
+			}),
+		);
+		// Right-clicking a rendered link (Live Preview, reading view) only
+		// reports the URL: take the text from the cursor when it's on that
+		// link, or the URL's most used text otherwise.
+		this.registerEvent(
+			this.app.workspace.on("url-menu", (menu, url) => {
+				const urlKey = normUrl(url);
+				const variants = this.variantsOfUrl(urlKey);
+				if (variants.length === 0) return;
+				const active = this.app.workspace.activeEditor;
+				const atCursor = active?.editor ? this.linkAtCursor(active.editor, active.file) : null;
+				if (atCursor && normUrl(atCursor.url) === urlKey) {
+					this.addEditLinkItem(menu, atCursor.text, atCursor.url);
+				} else {
+					const top = variants.reduce((best, variant) => (variant.paths.length > best.paths.length ? variant : best));
+					this.addEditLinkItem(menu, top.text, url);
+				}
+			}),
+		);
 		this.addCommand({
 			id: "rebuild-index",
 			name: "Rebuild link index",
@@ -118,6 +162,135 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 			limit,
 			now: Date.now(),
 		});
+	}
+
+	/** The index's ignore-list filter; vault-wide edits leave what it drops alone. */
+	get linkFilter(): (pair: LinkPair) => boolean {
+		return this.keep;
+	}
+
+	/** The texts used for one URL, with their notes. */
+	variantsOfUrl(urlKey: string): { key: string; text: string; paths: readonly string[] }[] {
+		const out = [];
+		for (const stat of this.index.pairStats()) {
+			if (stat.urlKey === urlKey) out.push({ key: stat.key, text: mostFrequent(stat.texts), paths: [...stat.paths] });
+		}
+		return out;
+	}
+
+	/** Opens the edit modal on a link, unless the index leaves it out. */
+	openEditLink(text: string, url: string): void {
+		const key = fold(stripMarkdown(text));
+		const urlKey = normUrl(url);
+		if (!this.variantsOfUrl(urlKey).some((variant) => variant.key === key)) {
+			new Notice("This link is in an excluded folder or on an ignore list, so it can't be edited across the vault.");
+			return;
+		}
+		new EditLinkModal(this, { key, urlKey, text, url }).open();
+	}
+
+	/** Each note the spec would change, with its changes; nothing is written. */
+	async previewRewrite(spec: RewriteSpec): Promise<RewritePreview[]> {
+		const previews: RewritePreview[] = [];
+		for (const file of this.rewriteCandidates(spec)) {
+			try {
+				const content = this.openEditor(file.path)?.getValue() ?? (await this.app.vault.cachedRead(file));
+				const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec);
+				if (changes.length > 0) previews.push({ file, lines: content.split(/\r?\n/), changes });
+			} catch (error) {
+				console.error(`External Link Autocomplete: could not read ${file.path}`, error);
+			}
+		}
+		return previews;
+	}
+
+	/**
+	 * Applies the spec to every note it matches, planning again against each
+	 * note's current content. Open notes are edited through their editor, so
+	 * unsaved typing isn't lost and Ctrl+Z works there; the rest go through
+	 * `Vault.process`.
+	 */
+	async rewriteLinks(spec: RewriteSpec): Promise<{ links: number; notes: number }> {
+		let links = 0;
+		let notes = 0;
+		for (const file of this.rewriteCandidates(spec)) {
+			let changed = 0;
+			try {
+				const editor = this.openEditor(file.path);
+				if (editor) {
+					const changes = planRewrite(editor.getValue(), this.rewriteSkipRanges(file, editor.getValue()), spec);
+					editor.transaction({
+						changes: changes.flatMap((change) =>
+							change.edits.map((edit) => ({
+								from: { line: change.line, ch: edit.from },
+								to: { line: change.line, ch: edit.to },
+								text: edit.insert,
+							})),
+						),
+					});
+					changed = changes.length;
+				} else {
+					await this.app.vault.process(file, (content) => {
+						const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec);
+						changed = changes.length;
+						return applyChanges(content, changes);
+					});
+				}
+			} catch (error) {
+				console.error(`External Link Autocomplete: could not edit ${file.path}`, error);
+			}
+			links += changed;
+			if (changed > 0) notes++;
+		}
+		return { links, notes };
+	}
+
+	/** Notes the index says use the spec's links. */
+	private rewriteCandidates(spec: RewriteSpec): TFile[] {
+		const paths = new Set<string>();
+		for (const variant of this.variantsOfUrl(spec.urlKey)) {
+			if (spec.allTexts || variant.key === spec.key) for (const path of variant.paths) paths.add(path);
+		}
+		const files: TFile[] = [];
+		for (const path of [...paths].sort()) {
+			const file = this.app.vault.getFileByPath(path);
+			if (file) files.push(file);
+		}
+		return files;
+	}
+
+	/**
+	 * Both the metadata cache's ranges and the text-derived ones: the cache
+	 * can lag behind an editor by a moment, and skipping too much only leaves
+	 * a link unedited, while skipping too little could edit code.
+	 */
+	private rewriteSkipRanges(file: TFile, content: string): LineRange[] {
+		const cache = this.app.metadataCache.getFileCache(file);
+		return [...(cache ? skipRanges(cache) : []), ...fallbackSkipRanges(content)];
+	}
+
+	private openEditor(path: string): Editor | null {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			if (leaf.view instanceof MarkdownView && leaf.view.file?.path === path) return leaf.view.editor;
+		}
+		return null;
+	}
+
+	/** The external link under the cursor, outside code and frontmatter. */
+	private linkAtCursor(editor: Editor, file: TFile | null): Occurrence | null {
+		const cursor = editor.getCursor();
+		if (file && this.isInSkippedSection(file, cursor.line)) return null;
+		return linkAt(editor.getLine(cursor.line), cursor.ch);
+	}
+
+	private addEditLinkItem(menu: Menu, text: string, url: string): void {
+		menu.addItem((item) =>
+			item
+				.setTitle("Edit link across vault")
+				.setIcon("pencil")
+				.setSection("action")
+				.onClick(() => this.openEditLink(text, url)),
+		);
 	}
 
 	/** Groups the index for the link browser. */

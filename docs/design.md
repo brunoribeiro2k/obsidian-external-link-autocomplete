@@ -43,7 +43,8 @@ External Link Helper is the only realistic candidate for a contribution. The gap
 - Internal links (`[[…]]`, `[text](note.md)`), which core and other plugins already cover.
 - Links that were never used in the vault: no web search, browser history or bookmark import.
 - Page-title fetching in the MVP (see [Privacy](#privacy)).
-- Link checking, dead-link detection, or rewriting existing links.
+- Link checking or dead-link detection.
+- Rewriting existing links, except through an explicit, previewed command (see [Editing a link across the vault](#editing-a-link-across-the-vault)).
 - Image embeds `![alt](url)`.
 - Reading view and Canvas cards. Only the Markdown editor is in scope (Source mode and Live Preview).
 
@@ -143,6 +144,17 @@ A view listing every indexed link, with how many notes use it and which ones ([#
 - **Notes:** a note row expands to the lines holding the link, read fresh with `cachedRead` and the scanner, since the index stores no offsets. Clicking a line opens the note with the link selected; Mod-click opens a new tab.
 - **Cost:** rows render collapsed and children only on expand. 200 groups are rendered at first, with a "Show more" button. Index updates re-render at most every 500 ms, keeping what's expanded and the scroll position. Grouping, sort and the toggle are saved with the settings.
 
+### Editing a link across the vault
+
+Renames a link's text or changes its URL in every note using it, after a preview ([#4](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/4)). It's for standardizing a vault that grew before the plugin, like Tag Wrangler's tag rename, but with the affected notes shown before anything is written.
+
+- **Entry points:** "Edit link across vault" in the editor's right-click menu and in the command palette, both only offered with the cursor in an external link outside code and frontmatter. Right-clicking a rendered link (Live Preview, reading view) offers it too: Obsidian's `url-menu` reports only the URL, so the text comes from the cursor when it's on that link, or from the URL's most used text.
+- **Modal:** text and URL fields, prefilled from the link. Every matched link becomes exactly `[text](url)` as typed, which also tidies URL spellings that only differ by a trailing `/` or the host's case.
+- **What matches:** by default, the pair: the same folded text and normalized URL, as in the index. "Also update other texts for this URL" (off by default, listing those texts with note counts) widens it to every link to that URL. Links the ignore lists drop are never edited, so `[here](…)` stays as written.
+- **Preview:** the affected notes with each link's line, a count, and the resulting link. The confirm button states the count ("Update 4 links"), uses Obsidian's destructive style, and sits under "This can't be undone." An empty or invalid result disables it.
+- **Writing:** candidates come from the index, then each note is re-scanned when applying, so offsets are never stale and a note edited since the preview is handled as it is now. Only the text and destination are replaced, keeping titles and spacing; `|` is escaped in table rows. Notes open in an editor are edited through `Editor.transaction`, so unsaved typing survives and Ctrl+Z works there. The rest go through `Vault.process`, never `Vault.modify`. Skip ranges are the union of the metadata cache's and the text-derived ones, because the cache can lag behind an editor, and skipping too much only leaves a link unedited.
+- **Undo:** none across notes yet ([#6](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/6)).
+
 ## Architecture
 
 ### Modules
@@ -155,12 +167,14 @@ trigger.ts    pure: (lineText, ch) → {start, end, query} | null
 ranking.ts    pure: (query, entries, options) → Suggestion[]
 index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list filter
 catalog.ts    pure: (pair stats, options) → grouped, filtered, sorted rows for the link browser
+rewrite.ts    pure: (content, skipRanges, spec) → LinkChange[] and applying them
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
 view.ts       LinkBrowserView extends ItemView
+edit-modal.ts EditLinkModal extends Modal
 settings.ts   Declarative PluginSettingTab + defaults
 ```
 
-Every module except `main`, `suggest`, `view` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
+Every module except `main`, `suggest`, `view`, `edit-modal` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
 
 ### Data model
 
@@ -358,7 +372,7 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 	- "Avoid unnecessary logging… the developer console should only show error messages".
 	- Use `this.app`, not the global `app`.
 	- No `innerHTML`/`outerHTML`/`insertAdjacentHTML`; use `createEl`/`createDiv`/`createSpan`.
-	- Use the Editor API rather than `Vault.modify` for the active file.
+	- Use the Editor API rather than `Vault.modify` for the active file, and `Vault.process` for background edits to other files.
 	- Use `normalizePath()` for user paths.
 	- Don't detach leaves in `onunload`.
 
@@ -381,6 +395,7 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 ### M2: polish
 
 - [Link browser](#link-browser) (#3).
+- [Editing a link across the vault](#editing-a-link-across-the-vault) (#4).
 - Persisted cache (if M1 measurements call for it), reference-style links, "older URL" hint, Shift+Enter text-only insert, pause command.
 
 ### Later

@@ -27,6 +27,8 @@ interface TreeItemOptions {
 	flair?: string;
 	openByDefault: boolean;
 	children: (el: HTMLElement) => void;
+	/** Fills the row's right-click (long-press on mobile) menu. */
+	menu?: (menu: Menu) => void;
 }
 
 /**
@@ -174,6 +176,7 @@ export class LinkBrowserView extends ItemView {
 			children: (el) => {
 				for (const variant of group.variants) this.renderVariant(el, `${group.id}\0${variant.id}`, variant, byUrl);
 			},
+			menu: (menu) => this.addEditItem(menu, group.variants[0]),
 		});
 	}
 
@@ -186,6 +189,7 @@ export class LinkBrowserView extends ItemView {
 			children: (el) => {
 				for (const path of variant.paths) this.renderNote(el, `${id}\0${path}`, variant, path);
 			},
+			menu: (menu) => this.addEditItem(menu, variant),
 		});
 	}
 
@@ -230,6 +234,15 @@ export class LinkBrowserView extends ItemView {
 		leaf.view.editor.scrollIntoView({ from, to }, true);
 	}
 
+	private addEditItem(menu: Menu, variant: CatalogVariant): void {
+		menu.addItem((item) =>
+			item
+				.setTitle("Edit link across vault")
+				.setIcon("pencil")
+				.onClick(() => this.plugin.openEditLink(variant.text, variant.url)),
+		);
+	}
+
 	/** A collapsible row with core's tree classes; children render on expand. */
 	private treeItem(parent: HTMLElement, id: string, options: TreeItemOptions): void {
 		const item = parent.createDiv({ cls: "tree-item" });
@@ -254,6 +267,15 @@ export class LinkBrowserView extends ItemView {
 			if (!this.toggled.delete(id)) this.toggled.add(id);
 			apply();
 		});
+		const fillMenu = options.menu;
+		if (fillMenu) {
+			self.addEventListener("contextmenu", (event) => {
+				event.preventDefault();
+				const menu = new Menu();
+				fillMenu(menu);
+				menu.showAtMouseEvent(event);
+			});
+		}
 		apply();
 	}
 }

@@ -33,6 +33,6 @@ deploy: ## Build and copy into a vault: make deploy VAULT="/path/to/Vault"
 	@test -n "$(VAULT)" || { echo 'Usage: make deploy VAULT="/path/to/Vault"'; exit 1; }
 	npm run deploy -- --vault "$(VAULT)"
 
-release: ## Open a release PR: make release BUMP=patch|minor|major
+release: ## Open a release PR from an up-to-date main: make release BUMP=patch|minor|major
 	@test -n "$(BUMP)" || { echo 'Usage: make release BUMP=patch|minor|major'; exit 1; }
 	npm run release -- $(BUMP)

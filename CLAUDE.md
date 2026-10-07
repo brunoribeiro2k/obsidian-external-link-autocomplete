@@ -50,7 +50,7 @@ The `Makefile` wraps these for the user (`make` lists them: `make check`, `make 
 - `npm test`: unit tests.
 - `npm run setup-vault`: build, then (re)generate `test-vault/` from the fixtures with the plugin enabled. Open it in Obsidian to verify editor behavior, which unit tests can't cover.
 - `npm run deploy -- --vault "/path/to/Vault"`: build and copy into a real vault.
-- `npm run release -- <patch|minor|major>`: bump the version on a `release/<version>` branch and open a PR. Merging it makes `release.yml` tag the commit (no `v` prefix) and draft the GitHub release.
+- `npm run release -- <patch|minor|major>`: bump the version on a `release/<version>` branch and open a PR. Run it from an up-to-date `main`; it refuses anywhere else. Merging it makes `release.yml` tag the commit (no `v` prefix) and draft the GitHub release.
 
 ## Conventions / hard rules
 

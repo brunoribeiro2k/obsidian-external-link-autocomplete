@@ -1,5 +1,6 @@
 import { App, normalizePath, PluginSettingTab, type SettingDefinitionItem } from "obsidian";
 import type ExternalLinkAutocompletePlugin from "./main.ts";
+import type { CatalogSort, Grouping } from "./catalog.ts";
 import type { MultiUrlMode, RankingMode } from "./ranking.ts";
 
 export interface ExternalLinkSettings {
@@ -11,6 +12,11 @@ export interface ExternalLinkSettings {
 	excludedFolders: string[];
 	ignoredTexts: string[];
 	ignoredDomains: string[];
+	browserPlacement: "sidebar" | "tab";
+	/** Set from the link browser's own controls, not the settings tab. */
+	browserGrouping: Grouping;
+	browserSort: CatalogSort;
+	browserOnlyInconsistent: boolean;
 }
 
 export const DEFAULT_SETTINGS: ExternalLinkSettings = {
@@ -22,10 +28,14 @@ export const DEFAULT_SETTINGS: ExternalLinkSettings = {
 	excludedFolders: [],
 	ignoredTexts: ["here", "link", "this", "source", "click here"],
 	ignoredDomains: [],
+	browserPlacement: "sidebar",
+	browserGrouping: "url",
+	browserSort: "notes",
+	browserOnlyInconsistent: false,
 };
 
 /** Which part of the plugin a settings change touches. */
-export type SettingsImpact = "suggester" | "index";
+export type SettingsImpact = "suggester" | "index" | "browser";
 
 /** Settings edited as one entry per line in a text area. */
 const LINE_LISTS = ["ignoredTexts", "ignoredDomains"] as const;
@@ -88,6 +98,15 @@ export class ExternalLinkSettingTab extends PluginSettingTab {
 				name: "Show note count",
 				desc: "Show how many notes use each link.",
 				control: { type: "toggle", key: "showNoteCount" },
+			},
+			{
+				name: "Open link browser in",
+				desc: "Where the link browser opens: the right sidebar, or a new tab next to your notes.",
+				control: {
+					type: "dropdown",
+					key: "browserPlacement",
+					options: { sidebar: "Right sidebar", tab: "New tab" },
+				},
 			},
 			{
 				name: "Ignored link texts",

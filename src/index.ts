@@ -8,12 +8,21 @@
  */
 
 import type { EntrySummary, RankEntry, UrlInfo } from "./ranking.ts";
-import { domainMatcher, fold, hostOf, normUrl, stripMarkdown } from "./text.ts";
+import { domainMatcher, fold, hostOf, mostFrequent, normUrl, stripMarkdown } from "./text.ts";
 
 /** One link as indexed: the raw text and the destination. */
 export interface LinkPair {
 	text: string;
 	url: string;
+}
+
+/** One text under one URL, with the notes that use it; see `UrlStat`. */
+export interface PairStat {
+	key: string;
+	urlKey: string;
+	paths: readonly string[];
+	texts: readonly string[];
+	urls: readonly string[];
 }
 
 interface StoredPair extends LinkPair {
@@ -70,26 +79,13 @@ class Aggregate implements RankEntry {
 	}
 }
 
-/** The most common value; ties go to the lexically smallest, for stability. */
-function mostFrequent(values: string[]): string {
-	if (values.length === 1) return values[0];
-	const counts = new Map<string, number>();
-	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-	let best = "";
-	let bestCount = -1;
-	for (const [value, count] of counts) {
-		if (count > bestCount || (count === bestCount && value < best)) {
-			best = value;
-			bestCount = count;
-		}
-	}
-	return best;
-}
-
 export class LinkIndex {
 	private readonly files = new Map<string, FileEntry>();
 	private readonly aggregates = new Map<string, Aggregate>();
 	private readonly mtimeOf = (path: string): number => this.files.get(path)?.mtime ?? 0;
+
+	/** `onChange` runs after every update, so views can follow the index. */
+	constructor(private readonly onChange: () => void = () => {}) {}
 
 	/** Replaces everything indexed for `path` with `pairs`. */
 	setFile(path: string, mtime: number, pairs: LinkPair[]): void {
@@ -108,6 +104,7 @@ export class LinkIndex {
 		if (stored.length === 0) return;
 		this.files.set(path, { mtime, pairs: stored });
 		for (const pair of stored) this.add(path, pair);
+		this.onChange();
 	}
 
 	removeFile(path: string): void {
@@ -115,6 +112,7 @@ export class LinkIndex {
 		if (!entry) return;
 		this.files.delete(path);
 		for (const pair of entry.pairs) this.subtract(path, pair);
+		this.onChange();
 	}
 
 	renameFile(oldPath: string, newPath: string): void {
@@ -127,6 +125,7 @@ export class LinkIndex {
 	clear(): void {
 		this.files.clear();
 		this.aggregates.clear();
+		this.onChange();
 	}
 
 	has(path: string): boolean {
@@ -148,6 +147,18 @@ export class LinkIndex {
 
 	entries(): Iterable<RankEntry> {
 		return this.aggregates.values();
+	}
+
+	/** Every distinct text and URL pair. The arrays are live; don't keep them. */
+	*pairStats(): Generator<PairStat> {
+		for (const aggregate of this.aggregates.values()) {
+			for (const [urlKey, stat] of aggregate.urls) yield { key: aggregate.key, urlKey, ...stat };
+		}
+	}
+
+	/** The indexed modification time of a note, or 0. */
+	mtime(path: string): number {
+		return this.mtimeOf(path);
 	}
 
 	/** A canonical, order-independent dump of the aggregates, for tests. */

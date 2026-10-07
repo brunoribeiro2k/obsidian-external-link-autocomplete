@@ -42,6 +42,19 @@ Manual checks for what unit tests can't cover. Type in a scratch note; each line
 - [ ] Settings: change "Ignored link texts" or "Excluded folders"; suggestions follow within a couple of seconds.
 - [ ] "Rebuild link index" from the command palette works, and has no default hotkey.
 
+## Link browser
+
+- [ ] "Open link browser" opens "External links" in the right sidebar; running it again reveals the same view.
+- [ ] "Open link browser in new tab" opens it as a main tab; Settings → "Open link browser in" → New tab makes the first command do the same.
+- [ ] Rows look native: collapse arrows, note counts on the right, indentation, theme colors in light and dark.
+- [ ] By URL: `docs.obsidian.md › Home` expands to "Docs" and "Obsidian developer docs", each with its notes.
+- [ ] The sort button's menu switches to "Group by text": "Docs" expands to two URLs. The choice survives closing and reopening the view.
+- [ ] "Only inconsistent" (the split icon, highlighted when on) leaves only those two groups, depending on the grouping.
+- [ ] Filtering by `jira` keeps only the Jira link, in both groupings.
+- [ ] A note row shows the line with the link highlighted; clicking it opens the note with the link selected. Mod-click opens it in a new tab.
+- [ ] Add a link to a note; it appears in the browser within a second or two, without collapsing what's expanded.
+- [ ] Mobile: the view opens in the right drawer and lines are tappable.
+
 ## Platforms
 
 - [ ] Live Preview and Source mode.

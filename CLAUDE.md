@@ -34,7 +34,7 @@ Don't re-litigate these without being asked:
 
 ## Layout
 
-- `src/main.ts`: plugin entry (bundled to `main.js`), with `suggest`, `settings` and the pure modules `text`, `scanner`, `trigger`, `ranking` and `index` next to it (see the design doc's module table). The pure modules must stay **pure**: no `obsidian` import, so they're unit-testable under Node.
+- `src/main.ts`: plugin entry (bundled to `main.js`), with `suggest`, `view`, `settings` and the pure modules `text`, `scanner`, `trigger`, `ranking`, `index` and `catalog` next to it (see the design doc's module table). The pure modules must stay **pure**: no `obsidian` import, so they're unit-testable under Node.
 - `test/*.test.ts`: `node --test` unit tests, with TypeScript loaded through `tsx` (the local Node build has no native TypeScript support). Import sources with explicit `.ts` extensions (`../src/scanner.ts`).
 - `test/fixtures/vault/`: version-controlled sample notes for manual verification, including `Checklist.md` and an `Excluded/` folder. They're copied into the gitignored `test-vault/` by `npm run setup-vault`, which also seeds the plugin's settings to exclude that folder.
 - `docs/design.md`: the spec.

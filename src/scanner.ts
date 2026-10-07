@@ -16,6 +16,10 @@ export interface Occurrence {
 	url: string;
 	/** Zero-based line number. */
 	line: number;
+	/** Column of the opening `[`. */
+	start: number;
+	/** Column just after the closing `)`. */
+	end: number;
 }
 
 /** Inclusive zero-based line ranges the scanner must not look at. */
@@ -102,7 +106,7 @@ function scanBracket(content: string, start: number, line: number, out: Occurren
 		!trimmed.includes("![") &&
 		isHttpUrl(destination.url)
 	) {
-		out.push({ text: detach(trimmed), url: detach(destination.url), line });
+		out.push({ text: detach(trimmed), url: detach(destination.url), line, start, end: destination.end });
 	}
 	return destination.end;
 }

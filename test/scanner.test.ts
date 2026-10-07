@@ -136,3 +136,11 @@ test("an unclosed fence runs to the end", () => {
 	const text = "```\n[a](https://a.com)";
 	assert.deepEqual(pairs(text, fallbackSkipRanges(text)), []);
 });
+
+test("reports the columns of each link", () => {
+	const line = "see [a](https://a.com) and [b](<https://b.com> \"t\")";
+	assert.deepEqual(
+		scan(line).map(({ start, end }) => line.slice(start, end)),
+		["[a](https://a.com)", '[b](<https://b.com> "t")'],
+	);
+});

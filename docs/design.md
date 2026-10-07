@@ -132,6 +132,17 @@ Match the native `[[` suggester exactly. Subclass `EditorSuggest` and render int
 - The plugin uses no Node/Electron APIs, so `isDesktopOnly: false`. Avoid regex lookbehind, which the [mobile development page](https://docs.obsidian.md/Plugins/Getting+started/Mobile+development) flags for older iOS versions.
 - Cold start is slowest on mobile. A cached index (see [Persistence](#persistence)) is the first post-MVP item if the cold scan turns out to hurt there.
 
+### Link browser
+
+A view listing every indexed link, with how many notes use it and which ones ([#3](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/3)). It's the core Tags pane (counts, sorting) crossed with Backlinks (note → the matching line), and it reuses their classes: `nav-header` buttons, a `SearchComponent`, `tree-item` rows and `search-result-file-match` lines.
+
+- **Where:** the right sidebar or a main tab, per the "Open link browser in" setting. "Open link browser" reveals an open one, or opens it there. "Open link browser in new tab" always uses the main area. It's the same `ItemView` either way, and it can be dragged between the two.
+- **Grouping:** by URL (URL → the texts used for it → notes) or by text (text → the URLs it points at → notes). A level-two row is one variant: a text and URL pair, keyed like the index. Grouping and sort order (most notes, A to Z, recently used) share one menu behind a single header button, because grouping is a less common choice than sorting.
+- **Only inconsistent:** a header toggle keeping groups with more than one variant. By URL, it shows URLs written with several texts; by text, texts pointing at several URLs. That's where standardizing a vault starts.
+- **Filter:** folded substring over the texts and URLs, so "jira" finds a URL whose text says Jira even when grouped by URL.
+- **Notes:** a note row expands to the lines holding the link, read fresh with `cachedRead` and the scanner, since the index stores no offsets. Clicking a line opens the note with the link selected; Mod-click opens a new tab.
+- **Cost:** rows render collapsed and children only on expand. 200 groups are rendered at first, with a "Show more" button. Index updates re-render at most every 500 ms, keeping what's expanded and the scroll position. Grouping, sort and the toggle are saved with the settings.
+
 ## Architecture
 
 ### Modules
@@ -143,11 +154,13 @@ scanner.ts    pure: (text, skipRanges) → Occurrence[]
 trigger.ts    pure: (lineText, ch) → {start, end, query} | null
 ranking.ts    pure: (query, entries, options) → Suggestion[]
 index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list filter
+catalog.ts    pure: (pair stats, options) → grouped, filtered, sorted rows for the link browser
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
+view.ts       LinkBrowserView extends ItemView
 settings.ts   Declarative PluginSettingTab + defaults
 ```
 
-Every module except `main`, `suggest` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
+Every module except `main`, `suggest`, `view` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
 
 ### Data model
 
@@ -281,6 +294,7 @@ Memory misses the target on this worst case. It's acceptable on desktop. If it h
 | Show note count | Off | Aux column |
 | Ignored link texts | here, link, this, source, click here | One per line, folded like queries |
 | Ignored domains | — | One per line, glob-like (`*.internal.example.com`); `*` matches any run of characters |
+| Open link browser in | Right sidebar | Right sidebar / New tab; see [Link browser](#link-browser) |
 | Rebuild index | action row + command | No default hotkey |
 | Excluded folders | — | A list with a folder picker per row; paths go through `normalizePath()` |
 | Index bare URLs | — | Not in the MVP (see [Edge cases](#edge-cases)) |
@@ -366,6 +380,7 @@ From [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your
 
 ### M2: polish
 
+- [Link browser](#link-browser) (#3).
 - Persisted cache (if M1 measurements call for it), reference-style links, "older URL" hint, Shift+Enter text-only insert, pause command.
 
 ### Later

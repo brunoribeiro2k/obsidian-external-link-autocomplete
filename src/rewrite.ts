@@ -109,3 +109,62 @@ export function isValidLink(text: string, url: string): boolean {
 	const found = scan(`[${text}](${formatDestination(url)})`);
 	return found.length === 1 && found[0].text === text && found[0].url === url;
 }
+
+/** A link as a rewrite left it: where it is now, and its source before and after. */
+export interface AppliedLink {
+	line: number;
+	/** Column where the rewritten link starts. */
+	start: number;
+	before: string;
+	after: string;
+}
+
+/** Records what `changes` do to `content`, so they can be reverted later. */
+export function appliedLinks(content: string, changes: LinkChange[]): AppliedLink[] {
+	const lines = content.split(/\r?\n/);
+	const out: AppliedLink[] = [];
+	let line = -1;
+	let shift = 0;
+	for (const change of changes) {
+		if (change.line !== line) {
+			line = change.line;
+			shift = 0;
+		}
+		const before = lines[line].slice(change.start, change.end);
+		let after = before;
+		for (const edit of [...change.edits].sort((a, b) => b.from - a.from)) {
+			after = after.slice(0, edit.from - change.start) + edit.insert + after.slice(edit.to - change.start);
+		}
+		out.push({ line, start: change.start + shift, before, after });
+		shift += after.length - before.length;
+	}
+	return out;
+}
+
+/**
+ * Changes that put the links back as they were, for each link still on its
+ * line exactly as the rewrite left it. Edits elsewhere on the line may have
+ * moved it, so the closest unclaimed copy counts. The others are skipped.
+ */
+export function planRevert(content: string, applied: AppliedLink[]): { changes: LinkChange[]; skipped: number } {
+	const lines = content.split(/\r?\n/);
+	const claimed = new Set<string>();
+	const changes: LinkChange[] = [];
+	let skipped = 0;
+	for (const link of applied) {
+		const text = lines[link.line] ?? "";
+		let best = -1;
+		for (let at = text.indexOf(link.after); at >= 0; at = text.indexOf(link.after, at + 1)) {
+			if (claimed.has(`${link.line}:${at}`)) continue;
+			if (best < 0 || Math.abs(at - link.start) < Math.abs(best - link.start)) best = at;
+		}
+		if (best < 0) {
+			skipped++;
+			continue;
+		}
+		claimed.add(`${link.line}:${best}`);
+		const end = best + link.after.length;
+		changes.push({ line: link.line, start: best, end, edits: [{ from: best, to: end, insert: link.before }] });
+	}
+	return { changes, skipped };
+}

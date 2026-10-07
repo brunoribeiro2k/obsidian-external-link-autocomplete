@@ -3,7 +3,16 @@ import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.
 import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { rank, type Suggestion } from "./ranking.ts";
-import { applyChanges, linkAt, planRewrite, type LinkChange, type RewriteSpec } from "./rewrite.ts";
+import {
+	appliedLinks,
+	applyChanges,
+	linkAt,
+	planRevert,
+	planRewrite,
+	type AppliedLink,
+	type LinkChange,
+	type RewriteSpec,
+} from "./rewrite.ts";
 import { fallbackSkipRanges, scan, type LineRange, type Occurrence } from "./scanner.ts";
 import {
 	DEFAULT_SETTINGS,
@@ -41,6 +50,8 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	private scanGeneration = 0;
 	private readonly changeTimers = new Map<string, number>();
 	private rebuildTimer: number | null = null;
+	/** The last vault-wide link edit, per note, kept for this session only. */
+	private lastEdit: Map<string, AppliedLink[]> | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -70,6 +81,15 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 				const link = this.linkAtCursor(editor, info.file);
 				if (!link) return false;
 				if (!checking) this.openEditLink(link.text, link.url);
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "undo-last-link-edit",
+			name: "Undo last link edit",
+			checkCallback: (checking) => {
+				if (!this.lastEdit) return false;
+				if (!checking) void this.undoLastEdit();
 				return true;
 			},
 		});
@@ -206,43 +226,89 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 
 	/**
 	 * Applies the spec to every note it matches, planning again against each
-	 * note's current content. Open notes are edited through their editor, so
-	 * unsaved typing isn't lost and Ctrl+Z works there; the rest go through
-	 * `Vault.process`.
+	 * note's current content, and remembers what changed for the undo command.
 	 */
 	async rewriteLinks(spec: RewriteSpec): Promise<{ links: number; notes: number }> {
+		const applied = new Map<string, AppliedLink[]>();
 		let links = 0;
 		let notes = 0;
 		for (const file of this.rewriteCandidates(spec)) {
 			let changed = 0;
 			try {
-				const editor = this.openEditor(file.path);
-				if (editor) {
-					const changes = planRewrite(editor.getValue(), this.rewriteSkipRanges(file, editor.getValue()), spec);
-					editor.transaction({
-						changes: changes.flatMap((change) =>
-							change.edits.map((edit) => ({
-								from: { line: change.line, ch: edit.from },
-								to: { line: change.line, ch: edit.to },
-								text: edit.insert,
-							})),
-						),
-					});
-					changed = changes.length;
-				} else {
-					await this.app.vault.process(file, (content) => {
-						const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec);
-						changed = changes.length;
-						return applyChanges(content, changes);
-					});
-				}
+				changed = await this.editNote(file, (content) => {
+					const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec);
+					if (changes.length > 0) applied.set(file.path, appliedLinks(content, changes));
+					return changes;
+				});
 			} catch (error) {
 				console.error(`External Link Autocomplete: could not edit ${file.path}`, error);
 			}
 			links += changed;
 			if (changed > 0) notes++;
 		}
+		if (applied.size > 0) this.lastEdit = applied;
 		return { links, notes };
+	}
+
+	/** Puts back the links the last vault-wide edit changed, where they're unchanged since. */
+	async undoLastEdit(): Promise<void> {
+		const edit = this.lastEdit;
+		if (!edit) return;
+		this.lastEdit = null;
+		let links = 0;
+		let notes = 0;
+		let skipped = 0;
+		for (const [path, applied] of edit) {
+			const file = this.app.vault.getFileByPath(path);
+			if (!file) {
+				skipped += applied.length;
+				continue;
+			}
+			try {
+				const reverted = await this.editNote(file, (content) => {
+					const plan = planRevert(content, applied);
+					skipped += plan.skipped;
+					return plan.changes;
+				});
+				links += reverted;
+				if (reverted > 0) notes++;
+			} catch (error) {
+				console.error(`External Link Autocomplete: could not edit ${file.path}`, error);
+			}
+		}
+		let message = `Reverted ${links === 1 ? "1 link" : `${links} links`} in ${notes === 1 ? "1 note" : `${notes} notes`}.`;
+		if (skipped > 0) message += ` ${skipped === 1 ? "1 link was" : `${skipped} links were`} edited since and left as is.`;
+		new Notice(message);
+	}
+
+	/**
+	 * Applies the changes `plan` makes for a note's current content. Open
+	 * notes are edited through their editor, so unsaved typing isn't lost and
+	 * Ctrl+Z works there; the rest go through `Vault.process`. Returns how
+	 * many links changed.
+	 */
+	private async editNote(file: TFile, plan: (content: string) => LinkChange[]): Promise<number> {
+		const editor = this.openEditor(file.path);
+		if (editor) {
+			const changes = plan(editor.getValue());
+			editor.transaction({
+				changes: changes.flatMap((change) =>
+					change.edits.map((edit) => ({
+						from: { line: change.line, ch: edit.from },
+						to: { line: change.line, ch: edit.to },
+						text: edit.insert,
+					})),
+				),
+			});
+			return changes.length;
+		}
+		let changed = 0;
+		await this.app.vault.process(file, (content) => {
+			const changes = plan(content);
+			changed = changes.length;
+			return applyChanges(content, changes);
+		});
+		return changed;
 	}
 
 	/** Notes the index says use the spec's links. */
@@ -398,6 +464,11 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	}
 
 	private moveFile(file: TFile, oldPath: string): void {
+		const applied = this.lastEdit?.get(oldPath);
+		if (applied) {
+			this.lastEdit?.delete(oldPath);
+			this.lastEdit?.set(file.path, applied);
+		}
 		if (this.isExcluded(file.path)) {
 			this.index.removeFile(oldPath);
 		} else if (this.index.has(oldPath)) {

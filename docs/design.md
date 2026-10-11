@@ -137,7 +137,7 @@ Match the native `[[` suggester exactly. Subclass `EditorSuggest` and render int
 
 A view listing every indexed link, with how many notes use it and which ones ([#3](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/3)). It's the core Tags pane (counts, sorting) crossed with Backlinks (note → the matching line), and it reuses their classes: `nav-header` buttons, a `SearchComponent`, `tree-item` rows and `search-result-file-match` lines.
 
-- **Where:** the right sidebar or a main tab, per the "Open link browser in" setting. "Open link browser" reveals an open one, or opens it there. "Open link browser in new tab" always uses the main area. It's the same `ItemView` either way, and it can be dragged between the two.
+- **Where:** wherever it was last ([#17](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/17)). There's one command, "Open link browser", which reveals an open browser or opens one in the right sidebar, the left sidebar or a main tab, as the last browser was. The view records its placement on every layout change, so dragging it from the sidebar into a tab and closing it reopens it as a tab, and vice versa; a pop-out window counts as a tab. The placement is saved with the settings, so it survives a restart. 0.2.0's "Open link browser in" setting and "Open link browser in new tab" command are gone, and a saved "sidebar" reads as the right sidebar.
 - **Grouping:** by URL (URL → the texts used for it → notes) or by text (text → the URLs it points at → notes). A level-two row is one variant: a text and URL pair, keyed like the index. Grouping and sort order (most notes, A to Z, recently used) share one menu behind a single header button, because grouping is a less common choice than sorting.
 - **Only inconsistent:** a header toggle keeping groups with more than one variant. By URL, it shows URLs written with several texts; by text, texts pointing at several URLs. That's where standardizing a vault starts.
 - **Filter:** folded substring over the texts and URLs, so "jira" finds a URL whose text says Jira even when grouped by URL.
@@ -309,7 +309,6 @@ Memory misses the target on this worst case. It's acceptable on desktop. If it h
 | Show note count | Off | Aux column |
 | Ignored link texts | here, link, this, source, click here | One per line, folded like queries |
 | Ignored domains | — | One per line, glob-like (`*.internal.example.com`); `*` matches any run of characters |
-| Open link browser in | Right sidebar | Right sidebar / New tab; see [Link browser](#link-browser) |
 | Rebuild index | action row + command | No default hotkey |
 | Excluded folders | — | A list with a folder picker per row; paths go through `normalizePath()` |
 | Index bare URLs | — | Not in the MVP (see [Edge cases](#edge-cases)) |

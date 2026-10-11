@@ -45,7 +45,8 @@ Manual checks for what unit tests can't cover. Type in a scratch note; each line
 ## Link browser
 
 - [ ] "Open link browser" opens "External links" in the right sidebar; running it again reveals the same view.
-- [ ] "Open link browser in new tab" opens it as a main tab; Settings → "Open link browser in" → New tab makes the first command do the same.
+- [ ] The command palette has only one link browser command, and the settings have no "Open link browser in".
+- [ ] Drag the browser from the sidebar into a tab and close it; "Open link browser" reopens it as a tab. Drag it back to a sidebar (right or left) and close it; it reopens there. The placement survives restarting Obsidian.
 - [ ] Rows look native: collapse arrows, note counts on the right, indentation, theme colors in light and dark.
 - [ ] By URL: `docs.obsidian.md › Home` expands to "Docs" and "Obsidian developer docs", each with its notes.
 - [ ] The sort button's menu switches to "Group by text": "Docs" expands to two URLs. The choice survives closing and reopening the view.

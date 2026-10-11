@@ -76,6 +76,19 @@ Use `Link variants.md`. "Undo last link edit" (below) resets it, or run `make va
 - [ ] Apply an edit, change one of the edited links by hand in a closed note, then undo: that link stays as you wrote it, and the notice says 1 link was left as is.
 - [ ] Apply an edit, rename one of the edited notes, then undo: its links are reverted too.
 
+## External links in a note
+
+- [ ] With "Backlink in document" on (core Backlinks settings), open `Link variants.md` in Live Preview: "External links" is a third pane after "Linked mentions" and "Unlinked mentions", looking like them. One row per URL, in order of first use. A URL written with several texts lists them all, and "×N" shows when it's used more than once.
+- [ ] The row's flair is the number of notes in the vault using the URL; hovering it says so.
+- [ ] Clicking a row selects the first link to that URL and scrolls to it; clicking the `host › path` part opens the URL in the browser instead.
+- [ ] Right-clicking a row offers "Edit link across vault".
+- [ ] With backlinks in document off, the section stands alone right after the last line, with a separator; toggling backlinks moves it between the two places.
+- [ ] Add a link at the end of the note; the section follows within a second, without saving, and stays below the new text. Links in code blocks and frontmatter aren't listed.
+- [ ] Clicking the header collapses the section in every open note; it stays collapsed after reopening the note and restarting.
+- [ ] Source mode and reading view show it too (in reading view without backlinks, at the top of the footer), and clicking a row scrolls there. Switching modes moves it along.
+- [ ] A note without external links has no section. Canvas cards and embedded notes never get one.
+- [ ] Settings → "Show external links in notes" off removes every section at once; on brings them back.
+
 ## Platforms
 
 - [ ] Live Preview and Source mode.

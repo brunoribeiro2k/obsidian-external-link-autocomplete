@@ -46,7 +46,7 @@ External Link Helper is the only realistic candidate for a contribution. The gap
 - Link checking or dead-link detection.
 - Rewriting existing links, except through an explicit, previewed command (see [Editing a link across the vault](#editing-a-link-across-the-vault)).
 - Image embeds `![alt](url)`.
-- Reading view and Canvas cards. Only the Markdown editor is in scope (Source mode and Live Preview).
+- Reading view and Canvas cards for suggestions. Only the Markdown editor is in scope (Source mode and Live Preview); the [section listing a note's links](#external-links-in-a-note) also shows in reading view.
 
 ### User stories
 
@@ -145,6 +145,16 @@ A view listing every indexed link, with how many notes use it and which ones ([#
 - **Editing:** right-clicking a group or variant row (long-press on mobile) offers "Edit link across vault" ([#5](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/5)). A variant row opens the [edit modal](#editing-a-link-across-the-vault) on that pair; a group row opens it on the group's most used pair, from which "Also update other texts for this URL" unifies the rest. There's no ⋯ button, matching core's own trees. The view follows the edit through the usual index updates.
 - **Cost:** rows render collapsed and children only on expand. 200 groups are rendered at first, with a "Show more" button. Index updates re-render at most every 500 ms, keeping what's expanded and the scroll position. Grouping, sort and the toggle are saved with the settings.
 
+### External links in a note
+
+A section at the end of each note listing the external links it uses ([#16](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/16)), like core's backlinks in document. Core's outgoing links pane only knows internal links, since `http(s)` links aren't in `cache.links`.
+
+- **Where:** at the end of the note. With core's backlinks in document showing, it's one more pane in that block, after "Linked mentions" and "Unlinked mentions", built from core's own classes (`backlink-pane`, a `tree-item-self` header with a collapse icon and count, `search-result-container`), so it reads as part of the same group. Without them, it stands alone with a separator: a CodeMirror block widget after the last line in Live Preview and Source mode (`registerEditorExtension`, so it scrolls with the text and sits above the editor's bottom padding), or the start of the footer core renders backlinks into (`.mod-footer`) in reading view. The backlinks block and the footer are undocumented DOM, but there's no API for either; the section follows mode switches and toggling backlinks on `layout-change`. Only a note's main editor gets one (`editorInfoField` is a `MarkdownView`), not Canvas cards or embeds.
+- **What:** one row per URL (normalized like the index), in the order the URLs first appear: its texts (distinct, stripped of Markdown), "×N" when used more than once, the URL as `host › path`, and a flair with how many notes in the vault use the URL, per the index. A note without external links has no section. The header shows the URL count and collapses the section; the collapsed state is global and saved.
+- **Source:** the note's current text (`getViewData`, or the editor's document for the widget), scanned again 300 ms after typing, so unsaved edits show up. Skip ranges are the union of the cache's and the text-derived ones, as for editing. Every link the scanner finds is listed, including ones on the ignore lists and in excluded folders: the section describes the note, not the suggestions. Index updates refresh the counts.
+- **Actions:** clicking a row selects the first link to that URL (in reading view, scrolls to its line); clicking the `host › path` part opens the URL. Right-clicking offers "Edit link across vault".
+- **Setting:** "Show external links in notes", on by default.
+
 ### Editing a link across the vault
 
 Renames a link's text or changes its URL in every note using it, after a preview ([#4](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/4)). It's for standardizing a vault that grew before the plugin, like Tag Wrangler's tag rename, but with the affected notes shown before anything is written.
@@ -168,14 +178,16 @@ trigger.ts    pure: (lineText, ch) → {start, end, query} | null
 ranking.ts    pure: (query, entries, options) → Suggestion[]
 index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list filter
 catalog.ts    pure: (pair stats, options) → grouped, filtered, sorted rows for the link browser
+note-links.ts pure: a note's occurrences → one row per URL
 rewrite.ts    pure: (content, skipRanges, spec) → LinkChange[] and applying them
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
 view.ts       LinkBrowserView extends ItemView
+note-section.ts  The section at the end of a note: backlinks pane, editor widget, reading-view footer
 edit-modal.ts EditLinkModal extends Modal
 settings.ts   Declarative PluginSettingTab + defaults
 ```
 
-Every module except `main`, `suggest`, `view`, `edit-modal` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
+Every module except `main`, `suggest`, `view`, `note-section`, `edit-modal` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
 
 ### Data model
 
@@ -307,6 +319,7 @@ Memory misses the target on this worst case. It's acceptable on desktop. If it h
 | When a text has several links | Show all | Show all / Only most recent / Only most used |
 | Accept with tab | On | Enter always accepts |
 | Show note count | Off | Aux column |
+| Show external links in notes | On | See [External links in a note](#external-links-in-a-note) |
 | Ignored link texts | here, link, this, source, click here | One per line, folded like queries |
 | Ignored domains | — | One per line, glob-like (`*.internal.example.com`); `*` matches any run of characters |
 | Rebuild index | action row + command | No default hotkey |

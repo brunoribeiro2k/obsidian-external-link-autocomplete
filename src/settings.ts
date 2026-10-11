@@ -9,6 +9,7 @@ export interface ExternalLinkSettings {
 	multiUrl: MultiUrlMode;
 	tabAccepts: boolean;
 	showNoteCount: boolean;
+	showNoteLinks: boolean;
 	excludedFolders: string[];
 	ignoredTexts: string[];
 	ignoredDomains: string[];
@@ -17,6 +18,8 @@ export interface ExternalLinkSettings {
 	browserGrouping: Grouping;
 	browserSort: CatalogSort;
 	browserOnlyInconsistent: boolean;
+	/** Set from the section's own header. */
+	noteLinksCollapsed: boolean;
 }
 
 export const DEFAULT_SETTINGS: ExternalLinkSettings = {
@@ -25,6 +28,7 @@ export const DEFAULT_SETTINGS: ExternalLinkSettings = {
 	multiUrl: "all",
 	tabAccepts: true,
 	showNoteCount: false,
+	showNoteLinks: true,
 	excludedFolders: [],
 	ignoredTexts: ["here", "link", "this", "source", "click here"],
 	ignoredDomains: [],
@@ -32,6 +36,7 @@ export const DEFAULT_SETTINGS: ExternalLinkSettings = {
 	browserGrouping: "url",
 	browserSort: "notes",
 	browserOnlyInconsistent: false,
+	noteLinksCollapsed: false,
 };
 
 /** Where the link browser was last: a main tab or a sidebar. */
@@ -101,6 +106,11 @@ export class ExternalLinkSettingTab extends PluginSettingTab {
 				name: "Show note count",
 				desc: "Show how many notes use each link.",
 				control: { type: "toggle", key: "showNoteCount" },
+			},
+			{
+				name: "Show external links in notes",
+				desc: "List the external links a note uses at its end, below the text and above backlinks.",
+				control: { type: "toggle", key: "showNoteLinks" },
 			},
 			{
 				name: "Ignored link texts",

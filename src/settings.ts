@@ -12,8 +12,8 @@ export interface ExternalLinkSettings {
 	excludedFolders: string[];
 	ignoredTexts: string[];
 	ignoredDomains: string[];
-	browserPlacement: "sidebar" | "tab";
-	/** Set from the link browser's own controls, not the settings tab. */
+	/** Set from the link browser's own controls and placement, not the settings tab. */
+	browserPlacement: BrowserPlacement;
 	browserGrouping: Grouping;
 	browserSort: CatalogSort;
 	browserOnlyInconsistent: boolean;
@@ -28,11 +28,14 @@ export const DEFAULT_SETTINGS: ExternalLinkSettings = {
 	excludedFolders: [],
 	ignoredTexts: ["here", "link", "this", "source", "click here"],
 	ignoredDomains: [],
-	browserPlacement: "sidebar",
+	browserPlacement: "right",
 	browserGrouping: "url",
 	browserSort: "notes",
 	browserOnlyInconsistent: false,
 };
+
+/** Where the link browser was last: a main tab or a sidebar. */
+export type BrowserPlacement = "tab" | "right" | "left";
 
 /** Which part of the plugin a settings change touches. */
 export type SettingsImpact = "suggester" | "index" | "browser";
@@ -98,15 +101,6 @@ export class ExternalLinkSettingTab extends PluginSettingTab {
 				name: "Show note count",
 				desc: "Show how many notes use each link.",
 				control: { type: "toggle", key: "showNoteCount" },
-			},
-			{
-				name: "Open link browser in",
-				desc: "Where the link browser opens: the right sidebar, or a new tab next to your notes.",
-				control: {
-					type: "dropdown",
-					key: "browserPlacement",
-					options: { sidebar: "Right sidebar", tab: "New tab" },
-				},
 			},
 			{
 				name: "Ignored link texts",

@@ -33,7 +33,8 @@ interface TreeItemOptions {
 
 /**
  * Every external link in the index, grouped by URL or by text, with the
- * notes that use it. Lives in the right sidebar or in a main tab.
+ * notes that use it. Lives in a sidebar or in a main tab, and the next one
+ * opens wherever the last one was.
  */
 export class LinkBrowserView extends ItemView {
 	/** Ids of tree items whose open state differs from their default. */
@@ -96,6 +97,8 @@ export class LinkBrowserView extends ItemView {
 
 		this.contentEl.appendChild(this.listEl);
 		this.register(this.plugin.onIndexChange(() => this.refresh()));
+		this.plugin.rememberBrowserPlacement(this.leaf);
+		this.registerEvent(this.app.workspace.on("layout-change", () => this.plugin.rememberBrowserPlacement(this.leaf)));
 		this.render();
 	}
 

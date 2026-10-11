@@ -1,4 +1,16 @@
-import { CachedMetadata, Editor, MarkdownView, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder } from "obsidian";
+import {
+	CachedMetadata,
+	Editor,
+	MarkdownView,
+	Menu,
+	Notice,
+	Plugin,
+	TAbstractFile,
+	TFile,
+	TFolder,
+	WorkspaceLeaf,
+	WorkspaceWindow,
+} from "obsidian";
 import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.ts";
 import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
@@ -17,6 +29,7 @@ import { fallbackSkipRanges, scan, type LineRange, type Occurrence } from "./sca
 import {
 	DEFAULT_SETTINGS,
 	ExternalLinkSettingTab,
+	type BrowserPlacement,
 	type ExternalLinkSettings,
 	type SettingsImpact,
 } from "./settings.ts";
@@ -64,14 +77,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 			id: "open-link-browser",
 			name: "Open link browser",
 			callback: () => {
-				void this.openLinkBrowser(false);
-			},
-		});
-		this.addCommand({
-			id: "open-link-browser-in-new-tab",
-			name: "Open link browser in new tab",
-			callback: () => {
-				void this.openLinkBrowser(true);
+				void this.openLinkBrowser();
 			},
 		});
 		this.addCommand({
@@ -147,6 +153,8 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const data = (await this.loadData()) as Partial<ExternalLinkSettings> | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+		// 0.2.0 stored the "Open link browser in" setting as "sidebar" or "tab".
+		if ((this.settings.browserPlacement as string) === "sidebar") this.settings.browserPlacement = "right";
 		// Copy the lists so editing them never mutates the defaults.
 		this.settings.excludedFolders = [...this.settings.excludedFolders];
 		this.settings.ignoredTexts = [...this.settings.ignoredTexts];
@@ -376,21 +384,40 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		return { lines: data.split(/\r?\n/), occurrences: scan(data, skipRangesFor(data, this.app.metadataCache.getFileCache(file))) };
 	}
 
-	/**
-	 * Reveals the link browser if it's open (in a main tab, when `newTab`),
-	 * or opens it where the settings say, or in a new tab.
-	 */
-	async openLinkBrowser(newTab: boolean): Promise<void> {
+	/** Reveals the link browser if it's open, or opens it where it was last. */
+	async openLinkBrowser(): Promise<void> {
 		const { workspace } = this.app;
-		let leaf =
-			workspace.getLeavesOfType(LINK_BROWSER_VIEW).find((open) => !newTab || open.getRoot() === workspace.rootSplit) ??
-			null;
+		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(LINK_BROWSER_VIEW)[0] ?? null;
 		if (!leaf) {
-			leaf = newTab || this.settings.browserPlacement === "tab" ? workspace.getLeaf("tab") : workspace.getRightLeaf(false);
+			const placement = this.settings.browserPlacement;
+			leaf =
+				placement === "tab"
+					? workspace.getLeaf("tab")
+					: placement === "left"
+						? workspace.getLeftLeaf(false)
+						: workspace.getRightLeaf(false);
 			if (!leaf) return;
 			await leaf.setViewState({ type: LINK_BROWSER_VIEW, active: true });
 		}
 		await workspace.revealLeaf(leaf);
+	}
+
+	/**
+	 * Remembers where a link browser is, so the next one opens there. Called
+	 * on every layout change, which covers dragging it between a sidebar and
+	 * the main area; a leaf being detached has no known root and is ignored.
+	 */
+	rememberBrowserPlacement(leaf: WorkspaceLeaf): void {
+		const { workspace } = this.app;
+		const root = leaf.getRoot();
+		let placement: BrowserPlacement;
+		if (root === workspace.rightSplit) placement = "right";
+		else if (root === workspace.leftSplit) placement = "left";
+		else if (root === workspace.rootSplit || root instanceof WorkspaceWindow) placement = "tab";
+		else return;
+		if (placement === this.settings.browserPlacement) return;
+		this.settings.browserPlacement = placement;
+		void this.saveSettings("browser");
 	}
 
 	/** Whether a line of a note is frontmatter or code, per the metadata cache. */

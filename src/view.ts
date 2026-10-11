@@ -284,7 +284,7 @@ export class LinkBrowserView extends ItemView {
 }
 
 /** `host › path`, as in the suggestion popup. */
-function renderUrl(el: HTMLElement, url: string): void {
+export function renderUrl(el: HTMLElement, url: string): void {
 	const { host, path } = describeUrl(url, 60);
 	el.createSpan({ text: host });
 	if (path) {

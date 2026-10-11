@@ -58,3 +58,39 @@
 	font-size: var(--font-ui-small);
 	margin-top: var(--size-4-2);
 }
+
+/*
+ * External links at the end of a note. Inside core's backlinks in document it
+ * borrows their pane classes; standing alone it gets their separator too.
+ */
+.external-links-pane.mod-standalone {
+	margin-top: var(--size-4-8);
+	padding-top: var(--size-4-2);
+	border-top: var(--border-width) solid var(--background-modifier-border);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	cursor: var(--cursor);
+	user-select: none;
+}
+
+.external-links-pane-item .tree-item-inner {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.external-links-pane-count {
+	color: var(--text-faint);
+	margin-left: var(--size-4-1);
+}
+
+.external-links-pane-url {
+	color: var(--text-muted);
+	margin-left: var(--size-4-3);
+	text-decoration: none;
+}
+
+.external-links-pane-url:hover {
+	color: var(--link-external-color-hover, var(--text-accent-hover));
+	text-decoration: underline;
+}

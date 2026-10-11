@@ -1,5 +1,6 @@
 import {
 	CachedMetadata,
+	debounce,
 	Editor,
 	MarkdownView,
 	Menu,
@@ -14,6 +15,8 @@ import {
 import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.ts";
 import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
+import { noteLinks } from "./note-links.ts";
+import { noteLinksExtension, NoteLinksPanes, type NoteLinksData } from "./note-section.ts";
 import { rank, type Suggestion } from "./ranking.ts";
 import {
 	appliedLinks,
@@ -41,6 +44,8 @@ import { LINK_BROWSER_VIEW, LinkBrowserView } from "./view.ts";
 const CHANGE_DEBOUNCE_MS = 300;
 /** Quiet period before an index-affecting settings edit triggers a rebuild. */
 const SETTINGS_DEBOUNCE_MS = 1000;
+/** Index updates arrive per note; link sections outside the editor follow at most this often. */
+const NOTE_LINKS_REFRESH_MS = 300;
 /** The full scan yields to the UI after this much work. */
 const SCAN_SLICE_MS = 30;
 
@@ -54,9 +59,12 @@ export interface RewritePreview {
 export default class ExternalLinkAutocompletePlugin extends Plugin {
 	settings: ExternalLinkSettings = { ...DEFAULT_SETTINGS };
 	private readonly index = new LinkIndex(() => {
-		for (const listener of this.indexListeners) listener();
+		this.notifyIndexListeners();
+		this.notifyNoteLinks();
 	});
 	private readonly indexListeners = new Set<() => void>();
+	private readonly noteLinksListeners = new Set<() => void>();
+	private readonly noteLinksPanes = new NoteLinksPanes(this);
 	private keep: (pair: LinkPair) => boolean = () => true;
 	private suggester: ExternalLinkSuggest | null = null;
 	/** Bumped to abandon a full scan in progress. */
@@ -123,6 +131,19 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 				}
 			}),
 		);
+		this.registerEditorExtension(noteLinksExtension(this));
+		this.register(() => this.noteLinksPanes.detachAll());
+		const refreshPanes = debounce(() => this.noteLinksPanes.refreshAll(), NOTE_LINKS_REFRESH_MS, false);
+		this.register(() => refreshPanes.cancel());
+		this.register(this.onNoteLinksChange(() => refreshPanes()));
+		this.registerEvent(this.app.workspace.on("editor-change", () => refreshPanes()));
+		// Mode switches and toggling backlinks in document move the section.
+		const relayout = (): void => {
+			this.noteLinksPanes.refreshAll();
+			this.notifyNoteLinks();
+		};
+		this.registerEvent(this.app.workspace.on("layout-change", relayout));
+		this.registerEvent(this.app.workspace.on("file-open", relayout));
 		this.addCommand({
 			id: "rebuild-index",
 			name: "Rebuild link index",
@@ -177,9 +198,36 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		}, SETTINGS_DEBOUNCE_MS);
 	}
 
-	/** Pushes settings that only affect the popup into the suggester. */
+	/** Pushes settings that don't touch the index into the popup and the notes' link sections. */
 	applySettings(): void {
 		this.suggester?.applySettings();
+		this.notifyNoteLinks();
+	}
+
+	async setNoteLinksCollapsed(collapsed: boolean): Promise<void> {
+		this.settings.noteLinksCollapsed = collapsed;
+		this.notifyNoteLinks();
+		await this.saveSettings("browser");
+	}
+
+	/** The section at the end of a note, from its current text, or null when it shows nothing. */
+	noteLinksData(file: TFile, content: string): NoteLinksData | null {
+		if (!this.settings.showNoteLinks) return null;
+		const links = noteLinks(scan(content, this.rewriteSkipRanges(file, content)));
+		if (links.length === 0) return null;
+		const paths = new Map(links.map((link) => [link.urlKey, new Set<string>()]));
+		for (const stat of this.index.pairStats()) {
+			const set = paths.get(stat.urlKey);
+			if (set) for (const path of stat.paths) set.add(path);
+		}
+		const notes = links.map((link) => paths.get(link.urlKey)?.size ?? 0);
+		const collapsed = this.settings.noteLinksCollapsed;
+		const signature = JSON.stringify([
+			collapsed,
+			notes,
+			links.map((link) => [link.url, link.texts, link.count, link.first.line, link.first.start, link.first.end]),
+		]);
+		return { links, notes, collapsed, signature };
 	}
 
 	/** Ranked rows for a query; synchronous, straight from memory. */
@@ -357,7 +405,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		return linkAt(editor.getLine(cursor.line), cursor.ch);
 	}
 
-	private addEditLinkItem(menu: Menu, text: string, url: string): void {
+	addEditLinkItem(menu: Menu, text: string, url: string): void {
 		menu.addItem((item) =>
 			item
 				.setTitle("Edit link across vault")
@@ -372,10 +420,27 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		return buildCatalog(this.index.pairStats(), (path) => this.index.mtime(path), options);
 	}
 
+	private notifyIndexListeners(): void {
+		for (const listener of this.indexListeners) listener();
+	}
+
 	/** Runs `listener` after every index update; returns the unsubscribe. */
 	onIndexChange(listener: () => void): () => void {
 		this.indexListeners.add(listener);
 		return () => this.indexListeners.delete(listener);
+	}
+
+	private notifyNoteLinks(): void {
+		for (const listener of this.noteLinksListeners) listener();
+	}
+
+	/**
+	 * Runs `listener` whenever the notes' link sections may need redrawing:
+	 * index updates, their settings, layout changes. Returns the unsubscribe.
+	 */
+	onNoteLinksChange(listener: () => void): () => void {
+		this.noteLinksListeners.add(listener);
+		return () => this.noteLinksListeners.delete(listener);
 	}
 
 	/** Every link in a note, read fresh, with its lines for context. */

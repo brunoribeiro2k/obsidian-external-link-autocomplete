@@ -182,8 +182,8 @@ Two plugin methods give scripts, dataviewjs and agents the index as compact data
 
 **MCP tools.** When [Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-rest-api) is installed, the plugin registers two tools on its MCP server (`src/mcp.ts`), next to its built-in ones, for any connected client:
 
-- **`external_links_query`:** `query()`, with the same options, but `limit` defaults to 50 so an agent's first call stays small.
-- **`external_links_rows`:** `rows()` with its `folder`, paged with `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ total, offset, rows }`.
+- **`external_links_query`:** `query()`, with the same options, but `limit` defaults to 50 and `variantLimit` to 20, so an agent's first call stays small.
+- **`external_links_rows`:** `rows()` with its `folder` and `domain`, paged with `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ indexing, total, offset, rows }`.
 - Both are read-only (`readOnlyHint`). Each result is sent as `structuredContent` and as compact JSON text, for clients reading either; an invalid option comes back as an `isError` result naming it, which the model can correct.
 - **Registration:** through the `obsidian-local-rest-api` package's `getAPI(app, manifest, 3)`; extension API version 3 is the first with the definition form of `addMcpTool` and `structuredContent` (Local REST API 5.x). Without the plugin, or with an older one, `getAPI` returns `undefined` or throws, and nothing is registered. Plugins load in any order, and a reloaded Local REST API forgets extension tools, so the tools are registered on load and again on its `obsidian-local-rest-api:loaded` workspace event, replacing the previous registration; unload unregisters them.
 - **Cost:** tool arguments are declared with zod schemas, which the host wraps in its own zod 3 `object()`, so zod 3 is bundled. That takes `main.js` from 46 KB to about 110 KB.

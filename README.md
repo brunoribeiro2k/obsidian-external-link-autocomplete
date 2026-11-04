@@ -95,8 +95,8 @@ With [Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-
 
 | Tool | What it returns |
 |---|---|
-| `external_links_query` | `query()` above, with the same options. `limit` defaults to 50. |
-| `external_links_rows` | `rows()` above, with `folder`, a page at a time: `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ total, offset, rows }`. |
+| `external_links_query` | `query()` above, with the same options. `limit` defaults to 50 and `variantLimit` to 20. |
+| `external_links_rows` | `rows()` above, with `folder` and `domain`, a page at a time: `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ indexing, total, offset, rows }`. |
 
 For example, to find the URLs written with more than one text in October and November's daily notes:
 

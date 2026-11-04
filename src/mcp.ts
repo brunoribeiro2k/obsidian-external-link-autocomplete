@@ -25,6 +25,8 @@ export const ROWS_TOOL = "external_links_rows";
 
 /** Groups returned when the caller sets no `limit`, so an agent's first call stays small. */
 const DEFAULT_QUERY_LIMIT = 50;
+/** Variants per group when the caller sets no `variantLimit`: a big site can have hundreds of URLs. */
+const DEFAULT_VARIANT_LIMIT = 20;
 const DEFAULT_ROWS_LIMIT = 500;
 const MAX_ROWS_LIMIT = 5000;
 
@@ -40,6 +42,14 @@ const folder = (): z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString
 		.describe(
 			'Only links in notes under this vault folder, or any of these folders, e.g. "daily/2026-10" or ["daily/2026-10", "daily/2026-11"]. ' +
 				"Default the whole vault.",
+		);
+const domain = (): z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString>]>> =>
+	z
+		.union([z.string(), z.array(z.string())])
+		.optional()
+		.describe(
+			'Only links to this host or its subdomains, or any of these, e.g. "github.com" (also gist.github.com) or "*.atlassian.net". ' +
+				"Default every domain.",
 		);
 
 /**
@@ -65,13 +75,18 @@ export function registerMcpTools(
 		name: QUERY_TOOL,
 		title: "Query external links",
 		description:
-			"Lists the external Markdown links ([text](https://…)) used across the Obsidian vault, grouped by URL or by text, " +
+			"Lists the external Markdown links ([text](https://…)) used across the Obsidian vault, grouped by URL, by text or by domain, " +
 			"with how many notes use each. A group's variants are the distinct text and URL pairs in it, so a URL written " +
-			"with several texts (or a text pointing to several URLs) has several variants. `folder` scopes the notes before " +
-			"grouping, so counts and onlyInconsistent reflect only those notes. `total` counts every matching " +
-			`group; at most \`limit\` (default ${DEFAULT_QUERY_LIMIT}) are returned.`,
+			"with several texts (or a text pointing to several URLs) has several variants; by domain, they're the site's URLs. " +
+			"`folder` and `domain` scope the links before grouping, so counts, onlyInconsistent and minNotes reflect only those links. " +
+			`\`total\` counts every matching group; at most \`limit\` (default ${DEFAULT_QUERY_LIMIT}) are returned, each with at most ` +
+			`\`variantLimit\` (default ${DEFAULT_VARIANT_LIMIT}) variants; a cut group has \`variantCount\`. ` +
+			"`indexing: true` means the index is still being built and the results are partial.",
 		inputSchema: {
-			grouping: z.enum(["url", "text"]).optional().describe('Group by "url" (default) or by link "text".'),
+			grouping: z
+				.enum(["url", "text", "domain"])
+				.optional()
+				.describe('Group by "url" (default), by link "text", or by "domain" (one group per host, its URLs as variants).'),
 			sort: z
 				.enum(["notes", "name", "recent"])
 				.optional()
@@ -83,13 +98,18 @@ export function registerMcpTools(
 			onlyInconsistent: z
 				.boolean()
 				.optional()
-				.describe("Keeps only groups with more than one variant: URLs written with several texts, or texts with several URLs."),
+				.describe(
+					"Keeps only groups with more than one variant: URLs written with several texts, or texts with several URLs. Not with domain grouping.",
+				),
+			minNotes: count().optional().describe("Keeps only groups used in at least this many notes."),
 			limit: count().optional().describe(`Most groups to return. Default ${DEFAULT_QUERY_LIMIT}.`),
+			variantLimit: count().optional().describe(`Most variants per group. Default ${DEFAULT_VARIANT_LIMIT}.`),
 			includePaths: z
 				.union([z.boolean(), count()])
 				.optional()
 				.describe("Lists each variant's note paths: true for all, a number for at most that many. Default false."),
 			folder: folder(),
+			domain: domain(),
 		},
 		annotations: { readOnlyHint: true, openWorldHint: false },
 		callback: (args) =>
@@ -98,6 +118,7 @@ export function registerMcpTools(
 					plugin.query({
 						...withoutUndefined(args),
 						limit: (args.limit as number | undefined) ?? DEFAULT_QUERY_LIMIT,
+						variantLimit: (args.variantLimit as number | undefined) ?? DEFAULT_VARIANT_LIMIT,
 					}),
 				),
 			),
@@ -110,7 +131,8 @@ export function registerMcpTools(
 			"Lists every external Markdown link in the Obsidian vault, one row per link per note: " +
 			"{ text, url, domain, path, mtime } (mtime in milliseconds since the epoch), as that note writes them, sorted by note path. " +
 			"A flat table for counting or SQL-style analysis. Page through it with offset and limit; `total` is the row count. " +
-			"`folder` keeps only notes under those folders.",
+			"`folder` keeps only notes under those folders, `domain` only links to those sites. " +
+			"`indexing: true` means the index is still being built and the rows are partial.",
 		inputSchema: {
 			offset: count().optional().describe("Rows to skip. Default 0."),
 			limit: count()
@@ -118,15 +140,20 @@ export function registerMcpTools(
 				.optional()
 				.describe(`Most rows to return, up to ${MAX_ROWS_LIMIT}. Default ${DEFAULT_ROWS_LIMIT}.`),
 			folder: folder(),
+			domain: domain(),
 		},
 		annotations: { readOnlyHint: true, openWorldHint: false },
 		callback: (args) =>
 			Promise.resolve(
 				respond(() => {
-					const rows = plugin.rows(args.folder === undefined ? {} : { folder: args.folder as string | string[] });
-					const offset = (args.offset as number | undefined) ?? 0;
-					const limit = (args.limit as number | undefined) ?? DEFAULT_ROWS_LIMIT;
-					return { total: rows.length, offset, rows: rows.slice(offset, offset + limit) };
+					const { offset = 0, limit = DEFAULT_ROWS_LIMIT, ...options } = withoutUndefined(args) as {
+						offset?: number;
+						limit?: number;
+						folder?: string | string[];
+						domain?: string | string[];
+					};
+					const rows = plugin.rows(options);
+					return { indexing: plugin.indexing, total: rows.length, offset, rows: rows.slice(offset, offset + limit) };
 				}),
 			),
 	});

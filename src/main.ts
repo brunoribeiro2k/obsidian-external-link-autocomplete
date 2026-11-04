@@ -17,6 +17,7 @@ import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { noteLinks } from "./note-links.ts";
 import { noteLinksExtension, NoteLinksPanes, type NoteLinksData } from "./note-section.ts";
+import { linkRows, queryLinks, type LinkRow, type QueryOptions, type QueryResult } from "./query.ts";
 import { rank, type Suggestion } from "./ranking.ts";
 import {
 	appliedLinks,
@@ -418,6 +419,20 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	/** Groups the index for the link browser. */
 	catalog(options: CatalogOptions): CatalogGroup[] {
 		return buildCatalog(this.index.pairStats(), (path) => this.index.mtime(path), options);
+	}
+
+	/**
+	 * For scripts and agents: the index grouped like the link browser, with
+	 * note counts instead of note lists. See `QueryOptions`; invalid options
+	 * throw a `TypeError`.
+	 */
+	query(options: QueryOptions = {}): QueryResult {
+		return queryLinks(this.index.pairStats(), (path) => this.index.mtime(path), options);
+	}
+
+	/** For scripts and agents: every indexed link in every note, one row each. */
+	rows(): LinkRow[] {
+		return linkRows(this.index.pairStats(), (path) => this.index.mtime(path));
 	}
 
 	private notifyIndexListeners(): void {

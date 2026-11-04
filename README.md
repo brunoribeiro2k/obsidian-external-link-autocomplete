@@ -12,6 +12,7 @@ Start a Markdown link with `[` and type part of its text. External Link Autocomp
 - **Link browser.** Every external link in your vault in one view, with the notes that use it.
 - **Edit a link across the vault.** Change a link's text or URL in every note at once, after a preview, and undo it if needed.
 - **External links in each note.** A list at the end of every note of the links it uses, next to its backlinks.
+- **Query links from scripts.** The link index as compact data for `dataviewjs`, scripts and agents.
 - **Desktop and mobile**, fully local.
 
 ## Autocomplete
@@ -51,6 +52,34 @@ Rename a link's text or change its URL in every note that uses it. Run **Edit li
 At the end of every note, an **External links** section lists the links the note uses, one row per URL, with its texts and how many notes in the vault use it. With Obsidian's "Backlink in document" on, it sits next to "Linked mentions" and "Unlinked mentions"; otherwise it follows the note's text. It works in Live Preview, Source mode and reading view.
 
 Click a row to jump to the link, or its address to open it in your browser. Click the header to collapse it in every note. Turn it off with **Show external links in notes**.
+
+## Query links from scripts
+
+For scripts, `dataviewjs` blocks and agents, the plugin has two methods that return the link index as plain data. The interface may still change.
+
+```js
+const plugin = app.plugins.plugins["external-link-autocomplete"];
+
+// Grouped like the link browser, with note counts instead of note lists.
+plugin.query({ grouping: "url", filter: "github.com", onlyInconsistent: true, limit: 20 });
+// → { total: 37, groups: [{ label, notes, variants: [{ text, url, notes }] }, …] }
+
+// One row per link per note: { text, url, domain, path, mtime }.
+plugin.rows();
+```
+
+`query()` options, all optional:
+
+| Option | Values | Default |
+|---|---|---|
+| `grouping` | `"url"` or `"text"` | `"url"` |
+| `sort` | `"notes"`, `"name"` or `"recent"` | `"notes"` |
+| `filter` | Text matched against link texts and URLs, ignoring case and accents | none |
+| `onlyInconsistent` | Keep only groups with more than one variant | `false` |
+| `limit` | Most groups to return; `total` still counts all of them | all |
+| `includePaths` | `true` to list each variant's notes, or a number to list at most that many | `false` |
+
+An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
 
 ## Commands
 

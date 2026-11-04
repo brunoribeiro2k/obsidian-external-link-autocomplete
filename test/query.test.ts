@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LinkIndex } from "../src/index.ts";
-import { linkRows, parseFolder, parseQueryOptions, queryLinks } from "../src/query.ts";
+import { linkRows, parseDomain, parseFolder, parseQueryOptions, queryLinks } from "../src/query.ts";
 
 function sampleIndex(): LinkIndex {
 	const index = new LinkIndex();
@@ -83,15 +83,20 @@ test("includePaths lists all paths, or caps them", () => {
 
 test("query options default and reject invalid values", () => {
 	assert.deepEqual(parseQueryOptions(undefined), {
-		catalog: { grouping: "url", sort: "notes", filter: "", onlyInconsistent: false },
+		grouping: "url",
+		sort: "notes",
+		filter: "",
+		onlyInconsistent: false,
+		minNotes: 0,
 		limit: Infinity,
+		variantLimit: Infinity,
 		includePaths: 0,
-		inFolder: null,
+		keep: null,
 	});
 	const invalid: [unknown, RegExp][] = [
 		["url", /must be an object/],
 		[[], /must be an object/],
-		[{ grouping: "domain" }, /grouping must be one of url, text/],
+		[{ grouping: "host" }, /grouping must be one of url, text, domain/],
 		[{ sort: "size" }, /sort must be one of/],
 		[{ filter: 3 }, /filter must be a string/],
 		[{ onlyInconsistent: "yes" }, /onlyInconsistent must be a boolean/],
@@ -103,6 +108,12 @@ test("query options default and reject invalid values", () => {
 		[{ folder: "/" }, /folder must not be empty/],
 		[{ folder: [] }, /folder must not be an empty list/],
 		[{ folder: ["a", 3] }, /folder must be a string or a list of strings/],
+		[{ grouping: "domain", onlyInconsistent: true }, /onlyInconsistent doesn't apply to "domain" grouping/],
+		[{ minNotes: -2 }, /minNotes must be/],
+		[{ variantLimit: "3" }, /variantLimit must be/],
+		[{ domain: "" }, /domain must not be empty/],
+		[{ domain: [] }, /domain must not be an empty list/],
+		[{ domain: "https://github.com" }, /must be a host name/],
 	];
 	for (const [options, message] of invalid) {
 		assert.throws(() => parseQueryOptions(options), { name: "TypeError", message });
@@ -179,4 +190,88 @@ test("rows takes a folder and rejects unknown options", () => {
 		],
 	);
 	assert.throws(() => linkRows(index.pairStats(), () => 0, { limit: 3 }), { name: "TypeError", message: /unknown rows option "limit"/ });
+});
+
+function domainIndex(): LinkIndex {
+	const index = new LinkIndex();
+	index.setFile("a.md", 1, [
+		{ text: "Repo", url: "https://github.com/acme/repo" },
+		{ text: "Gist", url: "https://gist.github.com/acme/1" },
+		{ text: "Docs", url: "https://docs.example.com" },
+	]);
+	index.setFile("b.md", 2, [
+		{ text: "repo", url: "https://GitHub.com/acme/repo/" },
+		{ text: "Issues", url: "https://github.com/acme/repo/issues" },
+	]);
+	index.setFile("c.md", 3, [{ text: "Repo", url: "https://github.com/acme/repo" }]);
+	return index;
+}
+
+test("domain grouping has one group per host, its URLs as variants", () => {
+	assert.deepEqual(query(domainIndex(), { grouping: "domain" }), {
+		total: 3,
+		groups: [
+			{
+				label: "github.com",
+				notes: 3,
+				variants: [
+					{ text: "Repo", url: "https://github.com/acme/repo", notes: 3 },
+					{ text: "Issues", url: "https://github.com/acme/repo/issues", notes: 1 },
+				],
+			},
+			{ label: "docs.example.com", notes: 1, variants: [{ text: "Docs", url: "https://docs.example.com", notes: 1 }] },
+			{ label: "gist.github.com", notes: 1, variants: [{ text: "Gist", url: "https://gist.github.com/acme/1", notes: 1 }] },
+		],
+	});
+	assert.deepEqual(
+		query(domainIndex(), { grouping: "domain", filter: "issues" }).groups.map((group) => [group.label, group.variants.length]),
+		[["github.com", 2]],
+	);
+	assert.deepEqual(
+		query(domainIndex(), { grouping: "domain", sort: "name" }).groups.map((group) => group.label),
+		["docs.example.com", "gist.github.com", "github.com"],
+	);
+});
+
+test("domain keeps a host and its subdomains, with globs", () => {
+	const inDomain = parseDomain(["GitHub.com.", "*.atlassian.net"]);
+	assert.ok(inDomain);
+	assert.equal(inDomain("github.com"), true);
+	assert.equal(inDomain("gist.github.com"), true);
+	assert.equal(inDomain("notgithub.com"), false);
+	assert.equal(inDomain("acme.atlassian.net"), true);
+	assert.equal(parseDomain(undefined), null);
+
+	const result = query(domainIndex(), { domain: "github.com", grouping: "text" });
+	assert.deepEqual(
+		result.groups.map((group) => group.label),
+		["Repo", "Gist", "Issues"],
+	);
+	const rows = linkRows(domainIndex().pairStats(), () => 0, { domain: "gist.github.com" });
+	assert.deepEqual(
+		rows.map((row) => row.url),
+		["https://gist.github.com/acme/1"],
+	);
+});
+
+test("minNotes keeps groups used in enough notes, and total follows it", () => {
+	const result = query(domainIndex(), { minNotes: 2 });
+	assert.equal(result.total, 1);
+	assert.deepEqual(
+		result.groups.map((group) => [group.label, group.notes]),
+		[["https://github.com/acme/repo", 3]],
+	);
+	assert.equal(query(domainIndex(), { minNotes: 4 }).total, 0);
+});
+
+test("variantLimit caps variants and reports the full count", () => {
+	const [github] = query(domainIndex(), { grouping: "domain", variantLimit: 1, limit: 1 }).groups;
+	assert.deepEqual(github, {
+		label: "github.com",
+		notes: 3,
+		variantCount: 2,
+		variants: [{ text: "Repo", url: "https://github.com/acme/repo", notes: 3 }],
+	});
+	const [uncut] = query(domainIndex(), { grouping: "domain", variantLimit: 5, limit: 1 }).groups;
+	assert.equal("variantCount" in uncut, false);
 });

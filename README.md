@@ -62,26 +62,32 @@ const plugin = app.plugins.plugins["external-link-autocomplete"];
 
 // Grouped like the link browser, with note counts instead of note lists.
 plugin.query({ grouping: "url", filter: "github.com", onlyInconsistent: true, limit: 20 });
-// → { total: 37, groups: [{ label, notes, variants: [{ text, url, notes }] }, …] }
+// → { indexing: false, total: 37, groups: [{ label, notes, variants: [{ text, url, notes }] }, …] }
+
+// The sites you link to most, with their top 5 URLs each.
+plugin.query({ grouping: "domain", limit: 10, variantLimit: 5 });
 
 // One row per link per note: { text, url, domain, path, mtime }.
 plugin.rows();
-plugin.rows({ folder: ["daily/2026-10", "daily/2026-11"] });
+plugin.rows({ folder: ["daily/2026-10", "daily/2026-11"], domain: "github.com" });
 ```
 
 `query()` options, all optional:
 
 | Option | Values | Default |
 |---|---|---|
-| `grouping` | `"url"` or `"text"` | `"url"` |
+| `grouping` | `"url"`, `"text"`, or `"domain"` (one group per site, its URLs as variants) | `"url"` |
 | `sort` | `"notes"`, `"name"` or `"recent"` | `"notes"` |
 | `filter` | Text matched against link texts and URLs, ignoring case and accents | none |
-| `onlyInconsistent` | Keep only groups with more than one variant | `false` |
+| `onlyInconsistent` | Keep only groups with more than one variant (not with `"domain"`) | `false` |
+| `minNotes` | Keep only groups used in at least this many notes | all |
 | `limit` | Most groups to return; `total` still counts all of them | all |
+| `variantLimit` | Most variants per group; a group cut short has a `variantCount` | all |
 | `includePaths` | `true` to list each variant's notes, or a number to list at most that many | `false` |
 | `folder` | A folder or a list of folders: only links in notes under them count, so note counts and "only inconsistent" are worked out within those notes | whole vault |
+| `domain` | A site or a list, including subdomains (`github.com` covers `gist.github.com`); `*` works as a wildcard. Only links to them count | all |
 
-`rows()` takes `folder` too. An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
+`rows()` takes `folder` and `domain` too. An unknown option or invalid value throws an error. Right after Obsidian starts, the index is still being built: `query()` results then say `indexing: true`, and `plugin.indexing` tells `rows()` callers the same. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
 
 ## MCP tools for agents
 

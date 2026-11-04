@@ -12,7 +12,7 @@ Start a Markdown link with `[` and type part of its text. External Link Autocomp
 - **Link browser.** Every external link in your vault in one view, with the notes that use it.
 - **Edit a link across the vault.** Change a link's text or URL in every note at once, after a preview, and undo it if needed.
 - **External links in each note.** A list at the end of every note of the links it uses, next to its backlinks.
-- **Query links from scripts.** The link index as compact data for `dataviewjs`, scripts and agents.
+- **Query links from scripts and agents.** The link index as compact data for `dataviewjs` and scripts, and as MCP tools through Local REST API.
 - **Desktop and mobile**, fully local.
 
 ## Autocomplete
@@ -81,6 +81,24 @@ plugin.rows();
 
 An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
 
+## MCP tools for agents
+
+With [Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-rest-api) installed and enabled (version 5.3 or later), External Link Autocomplete adds two read-only tools to its MCP server, next to the built-in ones like `vault_read` and `search_query`. Any agent connected to that server can use them. Without Local REST API, the plugin works the same and registers nothing.
+
+| Tool | What it returns |
+|---|---|
+| `external_links_query` | `query()` above, with the same options. `limit` defaults to 50. |
+| `external_links_rows` | `rows()` above, a page at a time: `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ total, offset, rows }`. |
+
+For example, to find the URLs written with more than one text:
+
+```json
+{ "name": "external_links_query", "arguments": { "onlyInconsistent": true, "limit": 20 } }
+```
+
+- **Check they're there:** ask your MCP client to list the server's tools (in Claude Code, `/mcp`), or call Local REST API's `GET /` with your API key: its `apiExtensions` list shows each extension's `mcpTools`.
+- **Reloads:** if Local REST API is turned off and on again, or updated, the tools are added back automatically. A client that was already connected may need to reconnect to the MCP server to see them.
+
 ## Commands
 
 | Command | What it does |
@@ -110,6 +128,8 @@ None has a default hotkey; assign one under **Settings → Hotkeys**.
 ## Privacy
 
 Everything stays on your device. The plugin reads your notes to build an in-memory index of the links in them, and makes no network requests: no telemetry, no favicons, no page-title fetching.
+
+If you use Local REST API with MCP, the agents you connect to it can read that index through the [MCP tools](#mcp-tools-for-agents). They're served by Local REST API, on your machine and behind its API key; this plugin opens no port of its own.
 
 ## Installation
 

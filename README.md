@@ -66,6 +66,7 @@ plugin.query({ grouping: "url", filter: "github.com", onlyInconsistent: true, li
 
 // One row per link per note: { text, url, domain, path, mtime }.
 plugin.rows();
+plugin.rows({ folder: ["daily/2026-10", "daily/2026-11"] });
 ```
 
 `query()` options, all optional:
@@ -78,8 +79,9 @@ plugin.rows();
 | `onlyInconsistent` | Keep only groups with more than one variant | `false` |
 | `limit` | Most groups to return; `total` still counts all of them | all |
 | `includePaths` | `true` to list each variant's notes, or a number to list at most that many | `false` |
+| `folder` | A folder or a list of folders: only links in notes under them count, so note counts and "only inconsistent" are worked out within those notes | whole vault |
 
-An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
+`rows()` takes `folder` too. An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
 
 ## MCP tools for agents
 
@@ -88,12 +90,12 @@ With [Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-
 | Tool | What it returns |
 |---|---|
 | `external_links_query` | `query()` above, with the same options. `limit` defaults to 50. |
-| `external_links_rows` | `rows()` above, a page at a time: `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ total, offset, rows }`. |
+| `external_links_rows` | `rows()` above, with `folder`, a page at a time: `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ total, offset, rows }`. |
 
-For example, to find the URLs written with more than one text:
+For example, to find the URLs written with more than one text in October and November's daily notes:
 
 ```json
-{ "name": "external_links_query", "arguments": { "onlyInconsistent": true, "limit": 20 } }
+{ "name": "external_links_query", "arguments": { "folder": ["daily/2026-10", "daily/2026-11"], "onlyInconsistent": true, "limit": 20 } }
 ```
 
 - **Check they're there:** ask your MCP client to list the server's tools (in Claude Code, `/mcp`), or call Local REST API's `GET /` with your API key: its `apiExtensions` list shows each extension's `mcpTools`.

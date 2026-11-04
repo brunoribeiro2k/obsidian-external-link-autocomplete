@@ -33,6 +33,14 @@ const MAX_ROWS_LIMIT = 5000;
  * instance into a `$ref` to its first use, which not every client resolves.
  */
 const count = (): z.ZodNumber => z.number().int().min(0);
+const folder = (): z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString>]>> =>
+	z
+		.union([z.string(), z.array(z.string())])
+		.optional()
+		.describe(
+			'Only links in notes under this vault folder, or any of these folders, e.g. "daily/2026-10" or ["daily/2026-10", "daily/2026-11"]. ' +
+				"Default the whole vault.",
+		);
 
 /**
  * Registers the tools, replacing any registered before. Returns the handle
@@ -59,7 +67,8 @@ export function registerMcpTools(
 		description:
 			"Lists the external Markdown links ([text](https://…)) used across the Obsidian vault, grouped by URL or by text, " +
 			"with how many notes use each. A group's variants are the distinct text and URL pairs in it, so a URL written " +
-			"with several texts (or a text pointing to several URLs) has several variants. `total` counts every matching " +
+			"with several texts (or a text pointing to several URLs) has several variants. `folder` scopes the notes before " +
+			"grouping, so counts and onlyInconsistent reflect only those notes. `total` counts every matching " +
 			`group; at most \`limit\` (default ${DEFAULT_QUERY_LIMIT}) are returned.`,
 		inputSchema: {
 			grouping: z.enum(["url", "text"]).optional().describe('Group by "url" (default) or by link "text".'),
@@ -80,6 +89,7 @@ export function registerMcpTools(
 				.union([z.boolean(), count()])
 				.optional()
 				.describe("Lists each variant's note paths: true for all, a number for at most that many. Default false."),
+			folder: folder(),
 		},
 		annotations: { readOnlyHint: true, openWorldHint: false },
 		callback: (args) =>
@@ -99,19 +109,21 @@ export function registerMcpTools(
 		description:
 			"Lists every external Markdown link in the Obsidian vault, one row per link per note: " +
 			"{ text, url, domain, path, mtime } (mtime in milliseconds since the epoch), as that note writes them, sorted by note path. " +
-			"A flat table for counting or SQL-style analysis. Page through it with offset and limit; `total` is the row count.",
+			"A flat table for counting or SQL-style analysis. Page through it with offset and limit; `total` is the row count. " +
+			"`folder` keeps only notes under those folders.",
 		inputSchema: {
 			offset: count().optional().describe("Rows to skip. Default 0."),
 			limit: count()
 				.max(MAX_ROWS_LIMIT)
 				.optional()
 				.describe(`Most rows to return, up to ${MAX_ROWS_LIMIT}. Default ${DEFAULT_ROWS_LIMIT}.`),
+			folder: folder(),
 		},
 		annotations: { readOnlyHint: true, openWorldHint: false },
 		callback: (args) =>
 			Promise.resolve(
 				respond(() => {
-					const rows = plugin.rows();
+					const rows = plugin.rows(args.folder === undefined ? {} : { folder: args.folder as string | string[] });
 					const offset = (args.offset as number | undefined) ?? 0;
 					const limit = (args.limit as number | undefined) ?? DEFAULT_ROWS_LIMIT;
 					return { total: rows.length, offset, rows: rows.slice(offset, offset + limit) };

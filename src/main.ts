@@ -12,11 +12,13 @@ import {
 	WorkspaceLeaf,
 	WorkspaceWindow,
 } from "obsidian";
+import type { LocalRestApiPublicApi } from "obsidian-local-rest-api";
 import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.ts";
 import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { noteLinks } from "./note-links.ts";
 import { noteLinksExtension, NoteLinksPanes, type NoteLinksData } from "./note-section.ts";
+import { LOCAL_REST_API_LOADED, registerMcpTools, unregisterMcpTools } from "./mcp.ts";
 import { linkRows, queryLinks, type LinkRow, type QueryOptions, type QueryResult, type RowsOptions } from "./query.ts";
 import { rank, type Suggestion } from "./ranking.ts";
 import {
@@ -76,6 +78,8 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	private rebuildTimer: number | null = null;
 	/** The last vault-wide link edit, per note, kept for this session only. */
 	private lastEdit: Map<string, AppliedLink[]> | null = null;
+	/** Local REST API's handle while the MCP tools are registered. */
+	private mcp: LocalRestApiPublicApi | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -153,6 +157,20 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 			callback: () => {
 				void this.rebuildIndex();
 			},
+		});
+
+		// MCP tools on Local REST API's server, when it's installed. It may load
+		// before or after this plugin, and forgets extension tools on a reload,
+		// so register now and again whenever it announces itself.
+		this.mcp = registerMcpTools(this, null);
+		this.registerEvent(
+			this.app.workspace.on(LOCAL_REST_API_LOADED, () => {
+				this.mcp = registerMcpTools(this, this.mcp);
+			}),
+		);
+		this.register(() => {
+			unregisterMcpTools(this.mcp);
+			this.mcp = null;
 		});
 
 		this.register(() => {

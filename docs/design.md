@@ -168,7 +168,7 @@ Renames a link's text or changes its URL in every note using it, after a preview
 
 ### Querying from scripts and agents
 
-Two plugin methods give scripts, dataviewjs and agents the index as compact data, without reaching into internals ([#22](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/22)). An MCP tool over them is [#23](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/23).
+Two plugin methods give scripts, dataviewjs and agents the index as compact data, without reaching into internals ([#22](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/22)), and two MCP tools expose them to agents ([#23](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/23)).
 
 - **`query(options)`:** the [link browser](#link-browser)'s groups, with counts instead of note lists: `{ indexing, total, groups: [{ label, notes, variantCount?, variants: [{ text, url, notes, paths? }] }] }`. It takes the browser's `grouping` (default `"url"`), `sort` (`"notes"`), `filter` and `onlyInconsistent`, plus `minNotes` (keep groups in at least that many notes), `limit` (default all), `variantLimit` (default all; a cut group carries `variantCount`), `includePaths` (`false` by default, `true` for all, a number to cap each variant's sorted list), `folder` and `domain`.
 - **`"domain"` grouping:** one group per host, its variants the host's URLs, each with its most used text and spelling, so "which sites do I link to most" is one call. `filter` keeps a host when any of its links matches; `onlyInconsistent` doesn't apply and is rejected. `total` counts the matching groups before `limit`, so a caller can tell it was cut. Options aren't type-checked by callers, so an unknown option or invalid value throws a `TypeError` naming it, rather than quietly falling back to a default.
@@ -179,6 +179,15 @@ Two plugin methods give scripts, dataviewjs and agents the index as compact data
 - **No SQL engine in the plugin.** `rows()` is enough for DuckDB on the caller's side, or `dv.array(rows)` in dataviewjs. Bundling AlaSQL would multiply `main.js` several times over for a feature most users won't touch.
 - **No stable API yet.** The methods are reached through `app.plugins.plugins["external-link-autocomplete"]`, which is undocumented Obsidian internals on the caller's side. A versioned `plugin.api` is a later step.
 - Both read the in-memory index as it is, so during the startup scan they return what's indexed so far, flagged by `indexing`.
+
+**MCP tools.** When [Local REST API with MCP](https://github.com/coddingtonbear/obsidian-local-rest-api) is installed, the plugin registers two tools on its MCP server (`src/mcp.ts`), next to its built-in ones, for any connected client:
+
+- **`external_links_query`:** `query()`, with the same options, but `limit` defaults to 50 and `variantLimit` to 20, so an agent's first call stays small.
+- **`external_links_rows`:** `rows()` with its `folder` and `domain`, paged with `offset` (default 0) and `limit` (default 500, at most 5000), returning `{ indexing, total, offset, rows }`.
+- Both are read-only (`readOnlyHint`). Each result is sent as `structuredContent` and as compact JSON text, for clients reading either; an invalid option comes back as an `isError` result naming it, which the model can correct.
+- **Registration:** through the `obsidian-local-rest-api` package's `getAPI(app, manifest, 3)`; extension API version 3 is the first with the definition form of `addMcpTool` and `structuredContent` (Local REST API 5.x). Without the plugin, or with an older one, `getAPI` returns `undefined` or throws, and nothing is registered. Plugins load in any order, and a reloaded Local REST API forgets extension tools, so the tools are registered on load and again on its `obsidian-local-rest-api:loaded` workspace event, replacing the previous registration; unload unregisters them.
+- **Cost:** tool arguments are declared with zod schemas, which the host wraps in its own zod 3 `object()`, so zod 3 is bundled. That takes `main.js` from 46 KB to about 110 KB.
+- The plugin still makes no network requests: Local REST API serves the tools, on its own localhost server and behind its own API key.
 
 ## Architecture
 
@@ -194,6 +203,7 @@ index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list 
 catalog.ts    pure: (pair stats, options) → grouped, filtered, sorted rows for the link browser
 note-links.ts pure: a note's occurrences → one row per URL
 query.ts      pure: (pair stats, options) → compact groups and flat rows for scripts and agents
+mcp.ts        MCP tools on Local REST API's server, when it's installed
 rewrite.ts    pure: (content, skipRanges, spec) → LinkChange[] and applying them
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
 view.ts       LinkBrowserView extends ItemView
@@ -202,7 +212,7 @@ edit-modal.ts EditLinkModal extends Modal
 settings.ts   Declarative PluginSettingTab + defaults
 ```
 
-Every module except `main`, `suggest`, `view`, `note-section`, `edit-modal` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
+Every module except `main`, `suggest`, `view`, `note-section`, `edit-modal`, `mcp` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
 
 ### Data model
 
@@ -370,6 +380,7 @@ UI follows the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Pl
 ## Privacy
 
 - **Fully local.** The plugin reads vault files through the Vault API and the metadata cache. It makes **no network requests**: no telemetry, no update pings, no favicons.
+- With Local REST API with MCP installed, its MCP clients can read the link index through the [MCP tools](#querying-from-scripts-and-agents). That server, its API key and who connects to it are Local REST API's; this plugin opens no port of its own.
 - The index lives in memory (and, post-MVP, in the plugin's own `data.json`). The README states this.
 - **Decision on page-title fetching: not in the MVP, never automatic, never on by default.** Fetching titles for vault URLs would tell third parties which sites you link to, and could hit internal URLs from a personal machine. If it ever ships, it's an explicit per-link command (for example, "Fetch title for link under cursor") with a disclosure in settings. It's never a background crawl, and it must be disclosed in the README as the community guidelines expect for network use.
 

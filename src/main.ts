@@ -70,6 +70,8 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	private suggester: ExternalLinkSuggest | null = null;
 	/** Bumped to abandon a full scan in progress. */
 	private scanGeneration = 0;
+	/** Until the first full scan finishes, and during each rebuild: the index is still filling. */
+	private scanning = true;
 	private readonly changeTimers = new Map<string, number>();
 	private rebuildTimer: number | null = null;
 	/** The last vault-wide link edit, per note, kept for this session only. */
@@ -426,8 +428,14 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	 * note counts instead of note lists. See `QueryOptions`; invalid options
 	 * throw a `TypeError`.
 	 */
-	query(options: QueryOptions = {}): QueryResult {
-		return queryLinks(this.index.pairStats(), (path) => this.index.mtime(path), options);
+	query(options: QueryOptions = {}): QueryResult & { indexing: boolean } {
+		const result = queryLinks(this.index.pairStats(), (path) => this.index.mtime(path), options);
+		return { indexing: this.indexing, ...result };
+	}
+
+	/** Whether the index is still being built, so results may be partial. */
+	get indexing(): boolean {
+		return this.scanning;
 	}
 
 	/**
@@ -516,6 +524,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	 */
 	async rebuildIndex(): Promise<void> {
 		const generation = ++this.scanGeneration;
+		this.scanning = true;
 		this.index.clear();
 		let sliceStart = performance.now();
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -533,6 +542,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 				sliceStart = performance.now();
 			}
 		}
+		this.scanning = false;
 	}
 
 	private indexContent(file: TFile, data: string, cache: CachedMetadata | null): void {

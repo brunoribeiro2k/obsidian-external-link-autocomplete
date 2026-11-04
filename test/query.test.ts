@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LinkIndex } from "../src/index.ts";
-import { linkRows, parseQueryOptions, queryLinks } from "../src/query.ts";
+import { linkRows, parseFolder, parseQueryOptions, queryLinks } from "../src/query.ts";
 
 function sampleIndex(): LinkIndex {
 	const index = new LinkIndex();
@@ -86,6 +86,7 @@ test("query options default and reject invalid values", () => {
 		catalog: { grouping: "url", sort: "notes", filter: "", onlyInconsistent: false },
 		limit: Infinity,
 		includePaths: 0,
+		inFolder: null,
 	});
 	const invalid: [unknown, RegExp][] = [
 		["url", /must be an object/],
@@ -98,6 +99,10 @@ test("query options default and reject invalid values", () => {
 		[{ limit: 1.5 }, /limit must be/],
 		[{ includePaths: "3" }, /includePaths must be/],
 		[{ fliter: "x" }, /unknown query option "fliter"/],
+		[{ folder: "" }, /folder must not be empty/],
+		[{ folder: "/" }, /folder must not be empty/],
+		[{ folder: [] }, /folder must not be an empty list/],
+		[{ folder: ["a", 3] }, /folder must be a string or a list of strings/],
 	];
 	for (const [options, message] of invalid) {
 		assert.throws(() => parseQueryOptions(options), { name: "TypeError", message });
@@ -112,4 +117,66 @@ test("rows has one row per link per note, as written there", () => {
 		{ text: "Docs", url: "https://other.example.com/docs", domain: "other.example.com", path: "b.md", mtime: 2 },
 		{ text: "Jira board", url: "https://jira.example.com/board", domain: "jira.example.com", path: "c.md", mtime: 1 },
 	]);
+});
+
+function dailyIndex(): LinkIndex {
+	const index = new LinkIndex();
+	index.setFile("daily/2026-10/01.md", 1, [{ text: "Board", url: "https://jira.example.com/board" }]);
+	index.setFile("daily/2026-10/02.md", 2, [{ text: "Board", url: "https://jira.example.com/board" }]);
+	index.setFile("daily/2026-11/01.md", 3, [{ text: "Jira", url: "https://jira.example.com/board" }]);
+	index.setFile("daily/2026-09/01.md", 4, [{ text: "Old board", url: "https://jira.example.com/board" }]);
+	index.setFile("daily/2026-100.md", 5, [{ text: "Not a folder match", url: "https://jira.example.com/board" }]);
+	index.setFile("projects/x.md", 6, [{ text: "Board", url: "https://jira.example.com/board" }]);
+	return index;
+}
+
+test("folder scopes the notes before grouping", () => {
+	const index = dailyIndex();
+	const october = query(index, { folder: "daily/2026-10", includePaths: true });
+	assert.deepEqual(october, {
+		total: 1,
+		groups: [
+			{
+				label: "https://jira.example.com/board",
+				notes: 2,
+				variants: [
+					{ text: "Board", url: "https://jira.example.com/board", notes: 2, paths: ["daily/2026-10/01.md", "daily/2026-10/02.md"] },
+				],
+			},
+		],
+	});
+	// Inconsistent across the vault, but not within October alone.
+	assert.equal(query(index, { onlyInconsistent: true }).total, 1);
+	assert.equal(query(index, { folder: "daily/2026-10", onlyInconsistent: true }).total, 0);
+	const autumn = query(index, { folder: ["/daily/2026-10/", "daily//2026-11"], onlyInconsistent: true });
+	assert.deepEqual(
+		autumn.groups[0].variants.map((variant) => [variant.text, variant.notes]),
+		[
+			["Board", 2],
+			["Jira", 1],
+		],
+	);
+	assert.equal(autumn.groups[0].notes, 3);
+});
+
+test("folder matches whole path segments", () => {
+	const inFolder = parseFolder("daily/2026-10");
+	assert.ok(inFolder);
+	assert.equal(inFolder("daily/2026-10/01.md"), true);
+	assert.equal(inFolder("daily/2026-100.md"), false);
+	assert.equal(inFolder("daily/2026-1"), false);
+	assert.equal(parseFolder(undefined), null);
+});
+
+test("rows takes a folder and rejects unknown options", () => {
+	const index = dailyIndex();
+	const rows = linkRows(index.pairStats(), (path) => index.mtime(path), { folder: ["daily/2026-11", "projects"] });
+	assert.deepEqual(
+		rows.map((row) => [row.path, row.text]),
+		[
+			["daily/2026-11/01.md", "Jira"],
+			["projects/x.md", "Board"],
+		],
+	);
+	assert.throws(() => linkRows(index.pairStats(), () => 0, { limit: 3 }), { name: "TypeError", message: /unknown rows option "limit"/ });
 });

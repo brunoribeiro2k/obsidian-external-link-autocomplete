@@ -66,6 +66,7 @@ plugin.query({ grouping: "url", filter: "github.com", onlyInconsistent: true, li
 
 // One row per link per note: { text, url, domain, path, mtime }.
 plugin.rows();
+plugin.rows({ folder: ["daily/2026-10", "daily/2026-11"] });
 ```
 
 `query()` options, all optional:
@@ -78,8 +79,9 @@ plugin.rows();
 | `onlyInconsistent` | Keep only groups with more than one variant | `false` |
 | `limit` | Most groups to return; `total` still counts all of them | all |
 | `includePaths` | `true` to list each variant's notes, or a number to list at most that many | `false` |
+| `folder` | A folder or a list of folders: only links in notes under them count, so note counts and "only inconsistent" are worked out within those notes | whole vault |
 
-An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
+`rows()` takes `folder` too. An unknown option or invalid value throws an error. `rows()` is the shape for SQL: in `dataviewjs`, `dv.array(plugin.rows())` can filter, group and sort it, and outside Obsidian, DuckDB can query it once saved as JSON.
 
 ## Commands
 

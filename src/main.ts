@@ -17,7 +17,7 @@ import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { noteLinks } from "./note-links.ts";
 import { noteLinksExtension, NoteLinksPanes, type NoteLinksData } from "./note-section.ts";
-import { linkRows, queryLinks, type LinkRow, type QueryOptions, type QueryResult } from "./query.ts";
+import { linkRows, queryLinks, type LinkRow, type QueryOptions, type QueryResult, type RowsOptions } from "./query.ts";
 import { rank, type Suggestion } from "./ranking.ts";
 import {
 	appliedLinks,
@@ -430,9 +430,12 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		return queryLinks(this.index.pairStats(), (path) => this.index.mtime(path), options);
 	}
 
-	/** For scripts and agents: every indexed link in every note, one row each. */
-	rows(): LinkRow[] {
-		return linkRows(this.index.pairStats(), (path) => this.index.mtime(path));
+	/**
+	 * For scripts and agents: every indexed link in every note (or under
+	 * `folder`), one row each. Invalid options throw a `TypeError`.
+	 */
+	rows(options: RowsOptions = {}): LinkRow[] {
+		return linkRows(this.index.pairStats(), (path) => this.index.mtime(path), options);
 	}
 
 	private notifyIndexListeners(): void {

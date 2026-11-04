@@ -17,6 +17,7 @@ import { EditLinkModal } from "./edit-modal.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { noteLinks } from "./note-links.ts";
 import { noteLinksExtension, NoteLinksPanes, type NoteLinksData } from "./note-section.ts";
+import { linkRows, queryLinks, type LinkRow, type QueryOptions, type QueryResult, type RowsOptions } from "./query.ts";
 import { rank, type Suggestion } from "./ranking.ts";
 import {
 	appliedLinks,
@@ -69,6 +70,8 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	private suggester: ExternalLinkSuggest | null = null;
 	/** Bumped to abandon a full scan in progress. */
 	private scanGeneration = 0;
+	/** Until the first full scan finishes, and during each rebuild: the index is still filling. */
+	private scanning = true;
 	private readonly changeTimers = new Map<string, number>();
 	private rebuildTimer: number | null = null;
 	/** The last vault-wide link edit, per note, kept for this session only. */
@@ -420,6 +423,29 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		return buildCatalog(this.index.pairStats(), (path) => this.index.mtime(path), options);
 	}
 
+	/**
+	 * For scripts and agents: the index grouped like the link browser, with
+	 * note counts instead of note lists. See `QueryOptions`; invalid options
+	 * throw a `TypeError`.
+	 */
+	query(options: QueryOptions = {}): QueryResult & { indexing: boolean } {
+		const result = queryLinks(this.index.pairStats(), (path) => this.index.mtime(path), options);
+		return { indexing: this.indexing, ...result };
+	}
+
+	/** Whether the index is still being built, so results may be partial. */
+	get indexing(): boolean {
+		return this.scanning;
+	}
+
+	/**
+	 * For scripts and agents: every indexed link in every note (or under
+	 * `folder`), one row each. Invalid options throw a `TypeError`.
+	 */
+	rows(options: RowsOptions = {}): LinkRow[] {
+		return linkRows(this.index.pairStats(), (path) => this.index.mtime(path), options);
+	}
+
 	private notifyIndexListeners(): void {
 		for (const listener of this.indexListeners) listener();
 	}
@@ -498,6 +524,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	 */
 	async rebuildIndex(): Promise<void> {
 		const generation = ++this.scanGeneration;
+		this.scanning = true;
 		this.index.clear();
 		let sliceStart = performance.now();
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -515,6 +542,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 				sliceStart = performance.now();
 			}
 		}
+		this.scanning = false;
 	}
 
 	private indexContent(file: TFile, data: string, cache: CachedMetadata | null): void {

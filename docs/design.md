@@ -166,6 +166,20 @@ Renames a link's text or changes its URL in every note using it, after a preview
 - **Writing:** candidates come from the index, then each note is re-scanned when applying, so offsets are never stale and a note edited since the preview is handled as it is now. Only the text and destination are replaced, keeping titles and spacing; `|` is escaped in table rows. Notes open in an editor are edited through `Editor.transaction`, so unsaved typing survives and Ctrl+Z works there. The rest go through `Vault.process`, never `Vault.modify`. Skip ranges are the union of the metadata cache's and the text-derived ones, because the cache can lag behind an editor, and skipping too much only leaves a link unedited.
 - **Undo:** "Undo last link edit" ([#6](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/6)), offered only while there's an edit to undo. Each edit records every changed link's source before and after, and where it ended up; the record lives in memory until Obsidian closes, and follows renamed notes. Undoing puts back each link still on its line exactly as the edit left it, taking the closest unclaimed copy when other edits on the line moved it, and reports how many were skipped because they changed since. Open notes also have their own Ctrl+Z. The modal's warning says so instead of "This can't be undone."
 
+### Querying from scripts and agents
+
+Two plugin methods give scripts, dataviewjs and agents the index as compact data, without reaching into internals ([#22](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/22)). An MCP tool over them is [#23](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/23).
+
+- **`query(options)`:** the [link browser](#link-browser)'s groups, with counts instead of note lists: `{ indexing, total, groups: [{ label, notes, variantCount?, variants: [{ text, url, notes, paths? }] }] }`. It takes the browser's `grouping` (default `"url"`), `sort` (`"notes"`), `filter` and `onlyInconsistent`, plus `minNotes` (keep groups in at least that many notes), `limit` (default all), `variantLimit` (default all; a cut group carries `variantCount`), `includePaths` (`false` by default, `true` for all, a number to cap each variant's sorted list), `folder` and `domain`.
+- **`"domain"` grouping:** one group per host, its variants the host's URLs, each with its most used text and spelling, so "which sites do I link to most" is one call. `filter` keeps a host when any of its links matches; `onlyInconsistent` doesn't apply and is rejected. `total` counts the matching groups before `limit`, so a caller can tell it was cut. Options aren't type-checked by callers, so an unknown option or invalid value throws a `TypeError` naming it, rather than quietly falling back to a default.
+- **`rows(options)`:** one row per link per note, `{ text, url, domain, path, mtime }`, with the text and URL as that note spells them, sorted by note. It's the flat shape SQL engines and dataframes take as is. Its options are `folder` and `domain`.
+- **`folder`:** one folder or a list, keeping links in notes under any of them (whole path segments, so `daily/2026-1` doesn't match `daily/2026-10/`), normalized like `normalizePath`. For `query()` it scopes the notes *before* grouping: counts, variants, labels and `onlyInconsistent` only reflect those notes, so a URL written differently elsewhere in the vault isn't inconsistent within the folder. Filtering a vault-wide result by its paths afterwards couldn't give that.
+- **`domain`:** one host or a list, matching the host and its subdomains (`github.com` also keeps `gist.github.com`), with `*` globs as in the ignore list. Like `folder`, it scopes the links before grouping.
+- **`indexing`:** true until the first full scan finishes, and during a rebuild. `query()` returns it with every result, and `plugin.indexing` has it for `rows()` callers, so an agent calling right after Obsidian starts knows the counts are partial.
+- **No SQL engine in the plugin.** `rows()` is enough for DuckDB on the caller's side, or `dv.array(rows)` in dataviewjs. Bundling AlaSQL would multiply `main.js` several times over for a feature most users won't touch.
+- **No stable API yet.** The methods are reached through `app.plugins.plugins["external-link-autocomplete"]`, which is undocumented Obsidian internals on the caller's side. A versioned `plugin.api` is a later step.
+- Both read the in-memory index as it is, so during the startup scan they return what's indexed so far, flagged by `indexing`.
+
 ## Architecture
 
 ### Modules
@@ -179,6 +193,7 @@ ranking.ts    pure: (query, entries, options) → Suggestion[]
 index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list filter
 catalog.ts    pure: (pair stats, options) → grouped, filtered, sorted rows for the link browser
 note-links.ts pure: a note's occurrences → one row per URL
+query.ts      pure: (pair stats, options) → compact groups and flat rows for scripts and agents
 rewrite.ts    pure: (content, skipRanges, spec) → LinkChange[] and applying them
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
 view.ts       LinkBrowserView extends ItemView

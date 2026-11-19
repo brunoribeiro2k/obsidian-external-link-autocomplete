@@ -46,15 +46,16 @@ External Link Helper is the only realistic candidate for a contribution. The gap
 - Link checking or dead-link detection.
 - Rewriting existing links, except through an explicit, previewed command (see [Editing a link across the vault](#editing-a-link-across-the-vault)).
 - Image embeds `![alt](url)`.
-- Reading view and Canvas cards for suggestions. Only the Markdown editor is in scope (Source mode and Live Preview); the [section listing a note's links](#external-links-in-a-note) also shows in reading view.
+- Reading view and Canvas cards for suggestions. Only the Markdown editor (Source mode and Live Preview) and the Properties view are in scope; the [section listing a note's links](#external-links-in-a-note) also shows in reading view.
 
 ### User stories
 
 1. When I type `[jira`, I'm offered `[Jira board](https://….atlassian.net/…)`, so I don't go hunting for the URL.
 2. When `[docs]` has pointed at several URLs, I see each URL under the text and pick the right one.
-3. I get no popup while typing `[[`, a footnote `[^1`, a task `- [ ]`, an image `![`, or inside code and frontmatter.
+3. I get no popup while typing `[[`, a footnote `[^1`, a task `- [ ]`, an image `![`, or inside code.
 4. On mobile I tap a suggestion; no hardware keys are needed.
 5. I can confirm that nothing leaves my machine.
+6. A property holding a link (`google-doc: "[GDocs - Plan](https://…)"`) is suggested and edited like a link in the body, and I get suggestions while typing a property value.
 
 ## Validating the intended approach
 
@@ -159,12 +160,25 @@ A section at the end of each note listing the external links it uses ([#16](http
 
 Renames a link's text or changes its URL in every note using it, after a preview ([#4](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/4)). It's for standardizing a vault that grew before the plugin, like Tag Wrangler's tag rename, but with the affected notes shown before anything is written.
 
-- **Entry points:** the [link browser](#link-browser)'s row menus, and "Edit link across vault" in the editor's right-click menu and in the command palette, both only offered with the cursor in an external link outside code and frontmatter. Right-clicking a rendered link (Live Preview, reading view) offers it too: Obsidian's `url-menu` reports only the URL, so the text comes from the cursor when it's on that link, or from the URL's most used text.
+- **Entry points:** the [link browser](#link-browser)'s row menus, and "Edit link across vault" in the editor's right-click menu and in the command palette, both only offered with the cursor in an external link outside code, a [property link](#links-in-properties) in Source mode included. Right-clicking a rendered link (Live Preview, reading view) offers it too: Obsidian's `url-menu` reports only the URL, so the text comes from the cursor when it's on that link, or from the URL's most used text.
 - **Modal:** text and URL fields, prefilled from the link. Every matched link becomes exactly `[text](url)` as typed, which also tidies URL spellings that only differ by a trailing `/` or the host's case.
 - **What matches:** by default, the pair: the same folded text and normalized URL, as in the index. "Also update other texts for this URL" (off by default, listing those texts with note counts) widens it to every link to that URL. Links the ignore lists drop are never edited, so `[here](…)` stays as written.
 - **Preview:** the affected notes with each link's line, a count, and the resulting link. The confirm button states the count ("Update 4 links"), uses Obsidian's destructive style, and sits under a note saying how to undo it. An empty or invalid result disables it.
 - **Writing:** candidates come from the index, then each note is re-scanned when applying, so offsets are never stale and a note edited since the preview is handled as it is now. Only the text and destination are replaced, keeping titles and spacing; `|` is escaped in table rows. Notes open in an editor are edited through `Editor.transaction`, so unsaved typing survives and Ctrl+Z works there. The rest go through `Vault.process`, never `Vault.modify`. Skip ranges are the union of the metadata cache's and the text-derived ones, because the cache can lag behind an editor, and skipping too much only leaves a link unedited.
 - **Undo:** "Undo last link edit" ([#6](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/6)), offered only while there's an edit to undo. Each edit records every changed link's source before and after, and where it ended up; the record lives in memory until Obsidian closes, and follows renamed notes. Undoing puts back each link still on its line exactly as the edit left it, taking the closest unclaimed copy when other edits on the line moved it, and reports how many were skipped because they changed since. Open notes also have their own Ctrl+Z. The modal's warning says so instead of "This can't be undone."
+
+### Links in properties
+
+Links in a note's frontmatter are indexed, suggested and edited like the body's ([#27](https://github.com/brunoribeiro2k/obsidian-external-link-autocomplete/issues/27)). Some properties hold an external link, written as a quoted Markdown link, such as a note's synced Google Doc: `google-doc: "[📃 GDocs - Some document](https://docs.google.com/…)"`.
+
+- **What's read:** every top-level property, from the YAML itself rather than `cache.frontmatter`, which has the values but not where they're written. A value counts when it fits on its line: a scalar (`key: "…"`), or a list, as `- "…"` lines or a flow `["…", "…"]`. Quoted scalars are decoded first (`\"`, `\\` and the other escapes in double quotes, `''` in single quotes), so a link's text reads as Obsidian shows it, and every column is mapped back to the raw line. Comments, nested maps, block scalars (`|`, `>`) and multi-line values are skipped. Each occurrence keeps its property's name and how its value is quoted.
+- **No configurable list.** Every property is scanned: a property only holds `[text](https://…)` when someone wrote a link there, and the ignore lists and excluded folders apply as in the body.
+- **Shown with the body's links.** The index, the link browser and a note's [external links](#external-links-in-a-note) don't tell the two apart. The link browser's note lines show the raw YAML line, which names the property (`google-doc: "[…](…)"`).
+- **Suggest, Source mode:** the editor suggester also fires on a frontmatter line, inside a property's value. The inserted link is escaped for the value's quoting. Where the `[` starts the value (`key: [ab`), which YAML would read as a list, the link is wrapped in double quotes: `key: "[text](url)"`.
+- **Suggest, Properties view:** an `EditorSuggest` only runs in the CodeMirror editor, and the Properties view's inputs aren't one. They get an `AbstractInputSuggest` ([AbstractInputSuggest](https://docs.obsidian.md/Reference/TypeScript+API/AbstractInputSuggest)), attached on `focusin` to the value inputs of text and list properties (`.metadata-property-value .metadata-input-longtext` and `.multi-select-input`, both contenteditable `div`s; undocumented DOM, read from Obsidian 1.15.1). Same trigger, ranking and rows, applied to the input's text at the caret. Accepting writes `[text](url)` into the input; Obsidian commits the value on Enter or blur, as when typing, and quotes it in the YAML. Obsidian's keymap handles keys in the capture phase and stops them, so the popup's Enter, Tab and Esc never reach the input's own handlers (which would commit the value, or revert it).
+- **Edit across vault:** property links are matched like the body's. Only the text and destination are replaced, escaped for the value's quoting, so the YAML isn't reformatted. In an unquoted value, a new text or URL that plain YAML can't hold (`: ` or ` #`) turns the value into a double-quoted one. "Edit link across vault" is offered with the cursor on a property link in Source mode.
+- **Setting:** "Include properties", on by default. Off, frontmatter is skipped everywhere, as before.
+- **Bare URLs:** not indexed in properties, as in the body (see [Edge cases](#edge-cases)).
 
 ### Querying from scripts and agents
 
@@ -197,6 +211,7 @@ Two plugin methods give scripts, dataviewjs and agents the index as compact data
 main.ts       Plugin lifecycle, event wiring, full scan, settings load/save
 text.ts       pure: fold, normUrl, stripMarkdown, URL display and insertion helpers
 scanner.ts    pure: (text, skipRanges) → Occurrence[]
+frontmatter.ts pure: property values in the YAML → Occurrence[]; quoting for writing into them
 trigger.ts    pure: (lineText, ch) → {start, end, query} | null
 ranking.ts    pure: (query, entries, options) → Suggestion[]
 index.ts      pure: LinkIndex, per-file contributions + aggregates; ignore-list filter
@@ -206,13 +221,14 @@ query.ts      pure: (pair stats, options) → compact groups and flat rows for s
 mcp.ts        MCP tools on Local REST API's server, when it's installed
 rewrite.ts    pure: (content, skipRanges, spec) → LinkChange[] and applying them
 suggest.ts    ExternalLinkSuggest extends EditorSuggest<Suggestion>
+property-suggest.ts  PropertyLinkSuggest extends AbstractInputSuggest<Suggestion>, for the Properties view
 view.ts       LinkBrowserView extends ItemView
 note-section.ts  The section at the end of a note: backlinks pane, editor widget, reading-view footer
 edit-modal.ts EditLinkModal extends Modal
 settings.ts   Declarative PluginSettingTab + defaults
 ```
 
-Every module except `main`, `suggest`, `view`, `note-section`, `edit-modal`, `mcp` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
+Every module except `main`, `suggest`, `property-suggest`, `view`, `note-section`, `edit-modal`, `mcp` and `settings` is pure (no `obsidian` import). They hold all the logic that can go wrong, and they're unit-testable in plain Node.
 
 ### Data model
 
@@ -249,7 +265,7 @@ class Aggregate {                           // Map<key = fold(stripMarkdown(text
 
 A single pass per line, skipping ranges from the cache:
 
-1. Skip lines inside `code` sections and `frontmatterPosition` (both are on [CachedMetadata](https://docs.obsidian.md/Reference/TypeScript+API/CachedMetadata)). Track inline backtick spans in the scanner itself. When a file has no cache yet, `fallbackSkipRanges` finds frontmatter and fenced blocks from the text (not indented code blocks).
+1. Skip lines inside `code` sections and `frontmatterPosition` (both are on [CachedMetadata](https://docs.obsidian.md/Reference/TypeScript+API/CachedMetadata)); property values are read separately (see [Links in properties](#links-in-properties)). Track inline backtick spans in the scanner itself. When a file has no cache yet, `fallbackSkipRanges` finds frontmatter and fenced blocks from the text (not indented code blocks).
 2. Find `[`. Skip it if it's preceded by `!` or `[`, or followed by `^`.
 3. Find the matching `]`, handling nested brackets and `\`-escapes.
 4. Require `(` immediately after it. Read the destination as `<…>`, or as a run with balanced parentheses that stops at whitespace. Allow an optional `"title"` and a closing `)`.
@@ -333,6 +349,7 @@ Memory misses the target on this worst case. It's acceptable on desktop. If it h
 | Ignore list | Texts (`here`, `link`, `this`, `source`, `click here`) and domain patterns. Applied at index time. |
 | Text is the URL (`[https://x](https://x)`) | Indexed like any other aliased link; the URL text is matched and inserted as is. |
 | Empty text, images, non-http schemes | Skipped. |
+| Links in properties | Indexed, suggested and edited, unless "Include properties" is off. See [Links in properties](#links-in-properties). |
 | Huge single note (logs, exports) | Pairs are deduped per note, so it counts once per pair. (Later, if needed: a setting to skip files over N KB.) |
 
 ## Settings
@@ -345,6 +362,7 @@ Memory misses the target on this worst case. It's acceptable on desktop. If it h
 | Accept with tab | On | Enter always accepts |
 | Show note count | Off | Aux column |
 | Show external links in notes | On | See [External links in a note](#external-links-in-a-note) |
+| Include properties | On | See [Links in properties](#links-in-properties) |
 | Ignored link texts | here, link, this, source, click here | One per line, folded like queries |
 | Ignored domains | — | One per line, glob-like (`*.internal.example.com`); `*` matches any run of characters |
 | Rebuild index | action row + command | No default hotkey |
@@ -388,6 +406,7 @@ UI follows the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Pl
 
 ### Unit tests (`node --test` + `tsx`)
 
+- **Frontmatter:** quoted, plain and list values, escapes mapped back to raw columns, comments, block scalars and nested maps skipped, writing into each quoting style.
 - **Scanner:** nested brackets, `\]` escapes, `https://en.wikipedia.org/wiki/Foo_(bar)`, `<url with spaces>`, `[t](url "title")`, images, wikilinks, footnotes, inline code, multiple links per line, CRLF.
 - **Trigger:** every row of the bracket-shapes table, plus table rows, callouts, nested lists, and the cursor at line start and end.
 - **Ranking:** tier ordering, all three modes, distinct-note counting, tie stability, a fold/diacritic case, multi-URL ordering.

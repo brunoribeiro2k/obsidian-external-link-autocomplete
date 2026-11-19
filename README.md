@@ -28,7 +28,8 @@ Press **Esc** to dismiss the suggestions. They stay closed until you start a new
 - **Sensible ranking.** Among equally good matches, links you use in more notes, and in notes you edited recently, come first.
 - **Every URL a text has pointed to.** If "Docs" has linked to two different sites, you get a row for each, told apart by host and path.
 - **Native look and feel.** The popup matches Obsidian's own suggestions and follows your theme.
-- **Stays out of your way.** No suggestions inside `[[` wikilinks, `![` images, `[^` footnotes, `- [ ]` task boxes, code or frontmatter. Links are indexed in the background and kept up to date as you edit, rename and delete notes.
+- **Properties too.** Links in a note's properties, such as `google-doc: "[GDocs - Plan](https://…)"`, are suggested like any other, and you get suggestions while typing a property value, in the Properties view or in Source mode. In Source mode the link is quoted as YAML needs. Turn it off with **Include properties**.
+- **Stays out of your way.** No suggestions inside `[[` wikilinks, `![` images, `[^` footnotes, `- [ ]` task boxes or code. Links are indexed in the background and kept up to date as you edit, rename and delete notes.
 
 ## Link browser
 
@@ -44,7 +45,7 @@ Rename a link's text or change its URL in every note that uses it. Run **Edit li
 
 - The dialog shows every affected line before anything changes, and the button says how many links it will update.
 - **Also update other texts for this URL** unifies every text a URL is written with in one go.
-- Notes you have open are edited in place, so unsaved typing is kept and Ctrl/Cmd+Z works there. Links in code blocks and frontmatter are never touched.
+- Notes you have open are edited in place, so unsaved typing is kept and Ctrl/Cmd+Z works there. Links in code blocks are never touched, and links in properties are rewritten in place, without reformatting the rest of the frontmatter.
 - **Undo last link edit** puts the links back, skipping any you've changed since. It's available until you close Obsidian.
 
 ## External links in each note
@@ -128,6 +129,7 @@ None has a default hotkey; assign one under **Settings → Hotkeys**.
 | Accept with tab | Tab inserts the selected suggestion, as Enter does. On by default. |
 | Show note count | Shows how many notes use each link in the suggestions. |
 | Show external links in notes | Lists a note's external links at its end. On by default. |
+| Include properties | Suggests, lists and edits links in note properties too. On by default. |
 | Ignored link texts | Texts that are never suggested. Defaults to here, link, this, source and click here. |
 | Ignored domains | Domains that are never suggested. `*` matches anything, as in `*.internal.example.com`. |
 | Excluded folders | Folders whose links are never suggested. |

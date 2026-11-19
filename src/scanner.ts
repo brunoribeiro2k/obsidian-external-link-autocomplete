@@ -5,6 +5,8 @@
  * cache's sections when available, see `fallbackSkipRanges` otherwise) and
  * inline code spans. Parentheses in URLs, `<…>` destinations, link titles,
  * nested brackets and backslash escapes are handled; a single regex can't.
+ * Links in property values are found by `frontmatter.ts`, which runs the
+ * same line scan over each decoded value.
  */
 
 import { isHttpUrl } from "./text.ts";
@@ -25,6 +27,21 @@ export interface Occurrence {
 	/** Columns of the destination as written, `<…>` included. */
 	urlStart: number;
 	urlEnd: number;
+	/** Set for a link in a frontmatter property's value. */
+	property?: PropertyValue;
+}
+
+/** How a YAML scalar is written: `"…"`, `'…'` or unquoted. */
+export type ScalarStyle = "double" | "single" | "plain";
+
+/** The property value a link sits in. */
+export interface PropertyValue {
+	/** The top-level property's name. */
+	name: string;
+	style: ScalarStyle;
+	/** Columns of the whole scalar on its line, quotes included. */
+	start: number;
+	end: number;
 }
 
 /** Inclusive zero-based line ranges the scanner must not look at. */
@@ -45,6 +62,13 @@ export function scan(text: string, skip: LineRange[] = []): Occurrence[] {
 		if (content.indexOf("](") < 0) continue;
 		scanLine(content, line, out);
 	}
+	return out;
+}
+
+/** The links in one line of text, as on line 0. */
+export function scanText(content: string): Occurrence[] {
+	const out: Occurrence[] = [];
+	if (content.indexOf("](") >= 0) scanLine(content, 0, out);
 	return out;
 }
 
@@ -221,14 +245,10 @@ export function fallbackSkipRanges(text: string): LineRange[] {
 	const lines = text.split(/\r?\n/);
 	const ranges: LineRange[] = [];
 	let line = 0;
-	if (lines[0] === "---") {
-		for (let end = 1; end < lines.length; end++) {
-			if (lines[end] === "---" || lines[end] === "...") {
-				ranges.push([0, end]);
-				line = end + 1;
-				break;
-			}
-		}
+	const frontmatter = frontmatterRange(lines);
+	if (frontmatter) {
+		ranges.push(frontmatter);
+		line = frontmatter[1] + 1;
 	}
 	for (; line < lines.length; line++) {
 		const open = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[line]);
@@ -244,4 +264,16 @@ export function fallbackSkipRanges(text: string): LineRange[] {
 		line = end;
 	}
 	return ranges;
+}
+
+/**
+ * The frontmatter's lines, its `---` delimiters included, or null when the
+ * note has none. `lines` may stop anywhere after the closing delimiter.
+ */
+export function frontmatterRange(lines: readonly string[]): LineRange | null {
+	if (lines[0] !== "---") return null;
+	for (let end = 1; end < lines.length; end++) {
+		if (lines[end] === "---" || lines[end] === "...") return [0, end];
+	}
+	return null;
 }

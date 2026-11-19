@@ -7,7 +7,8 @@
  */
 
 import type { LinkPair } from "./index.ts";
-import { scan, type LineRange, type Occurrence } from "./scanner.ts";
+import { encodeScalar, plainSafe, propertyLinks } from "./frontmatter.ts";
+import { scan, type LineRange, type Occurrence, type PropertyValue } from "./scanner.ts";
 import { escapePipes, fold, formatDestination, normUrl, stripMarkdown } from "./text.ts";
 import { isTableRow } from "./trigger.ts";
 
@@ -48,35 +49,75 @@ export function matchesSpec(occurrence: Occurrence, spec: RewriteSpec): boolean 
 
 /**
  * The links in `content` that the spec changes. Only the parts that differ
- * are replaced, so a link's title and spacing survive.
+ * are replaced, so a link's title and spacing survive. With `properties`,
+ * links in frontmatter values are planned too, escaped for their quoting;
+ * `skip` must then cover the frontmatter, as `fallbackSkipRanges` does.
  */
-export function planRewrite(content: string, skip: LineRange[], spec: RewriteSpec): LinkChange[] {
+export function planRewrite(content: string, skip: LineRange[], spec: RewriteSpec, properties = false): LinkChange[] {
 	const lines = content.split(/\r?\n/);
+	const body = scan(content, skip);
+	const occurrences = properties ? [...propertyLinks(lines), ...body] : body;
 	const changes: LinkChange[] = [];
-	for (const occurrence of scan(content, skip)) {
+	const requoted = new Set<string>();
+	for (const occurrence of occurrences) {
 		if (!matchesSpec(occurrence, spec)) continue;
-		const inTable = isTableRow(lines[occurrence.line]);
-		const edits: LineEdit[] = [];
-		if (occurrence.text !== spec.text) {
-			edits.push({
-				from: occurrence.start + 1,
-				to: occurrence.textEnd,
-				insert: inTable ? escapePipes(spec.text) : spec.text,
-			});
-		}
-		if (occurrence.url !== spec.url) {
-			const destination = formatDestination(spec.url);
-			edits.push({
-				from: occurrence.urlStart,
-				to: occurrence.urlEnd,
-				insert: inTable ? escapePipes(destination) : destination,
-			});
+		const value = occurrence.property;
+		let edits: LineEdit[];
+		if (!value) {
+			const escape = isTableRow(lines[occurrence.line]) ? escapePipes : (text: string) => text;
+			edits = linkEdits(occurrence, spec, escape);
+		} else if (value.style !== "plain" || (plainSafe(spec.text) && plainSafe(formatDestination(spec.url)))) {
+			edits = linkEdits(occurrence, spec, (text) => encodeScalar(text, value.style));
+		} else {
+			const id = `${occurrence.line}:${value.start}`;
+			if (requoted.has(id)) continue;
+			requoted.add(id);
+			const change = requote(lines[occurrence.line], occurrence.line, value, occurrences, spec);
+			if (change) changes.push(change);
+			continue;
 		}
 		if (edits.length > 0) {
 			changes.push({ line: occurrence.line, start: occurrence.start, end: occurrence.end, edits });
 		}
 	}
 	return changes;
+}
+
+/** The edits turning one link into the spec's text and URL, with `escape` applied to what's inserted. */
+function linkEdits(occurrence: Occurrence, spec: RewriteSpec, escape: (text: string) => string): LineEdit[] {
+	const edits: LineEdit[] = [];
+	if (occurrence.text !== spec.text) {
+		edits.push({ from: occurrence.start + 1, to: occurrence.textEnd, insert: escape(spec.text) });
+	}
+	if (occurrence.url !== spec.url) {
+		edits.push({ from: occurrence.urlStart, to: occurrence.urlEnd, insert: escape(formatDestination(spec.url)) });
+	}
+	return edits;
+}
+
+/**
+ * Rewrites the spec's links in an unquoted property value that can't hold
+ * the new text or URL as is, by turning the whole value into a
+ * double-quoted scalar. Unquoted, the raw value is the decoded one.
+ */
+function requote(
+	lineText: string,
+	line: number,
+	value: PropertyValue,
+	occurrences: readonly Occurrence[],
+	spec: RewriteSpec,
+): LinkChange | null {
+	const edits = occurrences
+		.filter((other) => other.line === line && other.property?.start === value.start && matchesSpec(other, spec))
+		.flatMap((other) => linkEdits(other, spec, (text) => text))
+		.sort((a, b) => b.from - a.from);
+	if (edits.length === 0) return null;
+	let scalar = lineText.slice(value.start, value.end);
+	for (const edit of edits) {
+		scalar = scalar.slice(0, edit.from - value.start) + edit.insert + scalar.slice(edit.to - value.start);
+	}
+	const insert = `"${encodeScalar(scalar, "double")}"`;
+	return { line, start: value.start, end: value.end, edits: [{ from: value.start, to: value.end, insert }] };
 }
 
 /** `content` with the changes applied; line endings are kept as they were. */

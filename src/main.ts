@@ -15,11 +15,13 @@ import {
 import type { LocalRestApiPublicApi } from "obsidian-local-rest-api";
 import { buildCatalog, type CatalogGroup, type CatalogOptions } from "./catalog.ts";
 import { EditLinkModal } from "./edit-modal.ts";
+import { insertionStyle, propertyLinkAt, scanFrontmatter, type LinkContext } from "./frontmatter.ts";
 import { LinkIndex, pairFilter, type LinkPair } from "./index.ts";
 import { noteLinks } from "./note-links.ts";
 import { noteLinksExtension, NoteLinksPanes, type NoteLinksData } from "./note-section.ts";
 import { LOCAL_REST_API_LOADED, registerMcpTools, unregisterMcpTools } from "./mcp.ts";
 import { linkRows, queryLinks, type LinkRow, type QueryOptions, type QueryResult, type RowsOptions } from "./query.ts";
+import { PROPERTY_INPUTS, PropertyLinkSuggest } from "./property-suggest.ts";
 import { rank, type Suggestion } from "./ranking.ts";
 import {
 	appliedLinks,
@@ -80,6 +82,9 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	private lastEdit: Map<string, AppliedLink[]> | null = null;
 	/** Local REST API's handle while the MCP tools are registered. */
 	private mcp: LocalRestApiPublicApi | null = null;
+	/** The Properties view's popups, one per value input that got focus; pruned as inputs go away. */
+	private readonly propertySuggesters = new Set<PropertyLinkSuggest>();
+	private propertySuggestersActive = true;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -138,6 +143,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 				}
 			}),
 		);
+		this.registerPropertySuggest();
 		this.registerEditorExtension(noteLinksExtension(this));
 		this.register(() => this.noteLinksPanes.detachAll());
 		const refreshPanes = debounce(() => this.noteLinksPanes.refreshAll(), NOTE_LINKS_REFRESH_MS, false);
@@ -234,7 +240,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	/** The section at the end of a note, from its current text, or null when it shows nothing. */
 	noteLinksData(file: TFile, content: string): NoteLinksData | null {
 		if (!this.settings.showNoteLinks) return null;
-		const links = noteLinks(scan(content, this.rewriteSkipRanges(file, content)));
+		const links = noteLinks(this.scanNote(content, this.rewriteSkipRanges(file, content)));
 		if (links.length === 0) return null;
 		const paths = new Map(links.map((link) => [link.urlKey, new Set<string>()]));
 		for (const stat of this.index.pairStats()) {
@@ -292,7 +298,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		for (const file of this.rewriteCandidates(spec)) {
 			try {
 				const content = this.openEditor(file.path)?.getValue() ?? (await this.app.vault.cachedRead(file));
-				const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec);
+				const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec, this.settings.indexProperties);
 				if (changes.length > 0) previews.push({ file, lines: content.split(/\r?\n/), changes });
 			} catch (error) {
 				console.error(`External Link Autocomplete: could not read ${file.path}`, error);
@@ -313,7 +319,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 			let changed = 0;
 			try {
 				changed = await this.editNote(file, (content) => {
-					const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec);
+					const changes = planRewrite(content, this.rewriteSkipRanges(file, content), spec, this.settings.indexProperties);
 					if (changes.length > 0) applied.set(file.path, appliedLinks(content, changes));
 					return changes;
 				});
@@ -419,11 +425,67 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		return null;
 	}
 
-	/** The external link under the cursor, outside code and frontmatter. */
+	/** The external link under the cursor, outside code, in a property value only when properties are included. */
 	private linkAtCursor(editor: Editor, file: TFile | null): Occurrence | null {
 		const cursor = editor.getCursor();
+		const frontmatter = editorFrontmatter(editor);
+		if (frontmatter && cursor.line < frontmatter.length) {
+			return this.settings.indexProperties ? propertyLinkAt(frontmatter, cursor.line, cursor.ch) : null;
+		}
 		if (file && this.isInSkippedSection(file, cursor.line)) return null;
 		return linkAt(editor.getLine(cursor.line), cursor.ch);
+	}
+
+	/**
+	 * Where a link typed with its `[` at column `open` of `line` goes: the
+	 * note's text, a property value (and how to write it there), or nowhere
+	 * (code, the frontmatter outside a value, or properties left out).
+	 */
+	linkContext(editor: Editor, file: TFile | null, line: number, open: number): LinkContext | null {
+		const frontmatter = editorFrontmatter(editor);
+		if (frontmatter && line < frontmatter.length) {
+			return this.settings.indexProperties ? insertionStyle(frontmatter, line, open) : null;
+		}
+		if (file && this.isInSkippedSection(file, line)) return null;
+		return "body";
+	}
+
+	/** Whether the Properties view's inputs get suggestions. */
+	get propertySuggestions(): boolean {
+		return this.propertySuggestersActive && this.settings.indexProperties;
+	}
+
+	/**
+	 * Gives each value input of the Properties view a popup the first time it
+	 * gets focus, in every window. Inputs live as long as their property row,
+	 * so popups are dropped once their input leaves the page.
+	 */
+	private registerPropertySuggest(): void {
+		const onFocusIn = (event: FocusEvent): void => {
+			const target = event.target as Node | null;
+			if (!this.propertySuggestions || !target?.instanceOf(HTMLDivElement) || !target.matches(PROPERTY_INPUTS)) return;
+			for (const suggester of this.propertySuggesters) {
+				if (suggester.inputEl === target) return;
+				if (!suggester.inputEl.isConnected) this.propertySuggesters.delete(suggester);
+			}
+			this.propertySuggesters.add(new PropertyLinkSuggest(this, target));
+		};
+		const documents = new Set<Document>();
+		const watch = (doc: Document): void => {
+			if (documents.has(doc)) return;
+			documents.add(doc);
+			this.registerDomEvent(doc, "focusin", onFocusIn);
+		};
+		watch(document);
+		this.registerEvent(this.app.workspace.on("window-open", (_window, win) => watch(win.document)));
+		this.app.workspace.onLayoutReady(() => {
+			this.app.workspace.iterateAllLeaves((leaf) => watch(leaf.view.containerEl.doc));
+		});
+		this.register(() => {
+			this.propertySuggestersActive = false;
+			for (const suggester of this.propertySuggesters) suggester.close();
+			this.propertySuggesters.clear();
+		});
 	}
 
 	addEditLinkItem(menu: Menu, text: string, url: string): void {
@@ -490,7 +552,17 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	/** Every link in a note, read fresh, with its lines for context. */
 	async scanFile(file: TFile): Promise<{ lines: string[]; occurrences: Occurrence[] }> {
 		const data = await this.app.vault.cachedRead(file);
-		return { lines: data.split(/\r?\n/), occurrences: scan(data, skipRangesFor(data, this.app.metadataCache.getFileCache(file))) };
+		const occurrences = this.scanNote(data, skipRangesFor(data, this.app.metadataCache.getFileCache(file)));
+		return { lines: data.split(/\r?\n/), occurrences };
+	}
+
+	/**
+	 * A note's links in order: its property values' when properties are
+	 * included, then the text's outside `skip`, which covers the frontmatter.
+	 */
+	private scanNote(content: string, skip: LineRange[]): Occurrence[] {
+		const body = scan(content, skip);
+		return this.settings.indexProperties ? [...scanFrontmatter(content), ...body] : body;
 	}
 
 	/** Reveals the link browser if it's open, or opens it where it was last. */
@@ -564,7 +636,7 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 	}
 
 	private indexContent(file: TFile, data: string, cache: CachedMetadata | null): void {
-		const pairs = scan(data, skipRangesFor(data, cache)).filter(this.keep);
+		const pairs = this.scanNote(data, skipRangesFor(data, cache)).filter(this.keep);
 		this.index.setFile(file.path, file.stat.mtime, pairs);
 	}
 
@@ -637,6 +709,22 @@ export default class ExternalLinkAutocompletePlugin extends Plugin {
 		window.clearTimeout(timer);
 		this.changeTimers.delete(path);
 	}
+}
+
+/**
+ * The frontmatter's lines in an editor, delimiters included, or null when
+ * the note has none. Reads only as far as the closing delimiter.
+ */
+function editorFrontmatter(editor: Editor): string[] | null {
+	if (editor.getLine(0) !== "---") return null;
+	const lines = ["---"];
+	const count = editor.lineCount();
+	for (let line = 1; line < count; line++) {
+		const text = editor.getLine(line);
+		lines.push(text);
+		if (text === "---" || text === "...") return lines;
+	}
+	return null;
 }
 
 /** Skip ranges from the metadata cache, or worked out from the text without it. */

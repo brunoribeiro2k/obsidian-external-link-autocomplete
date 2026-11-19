@@ -110,3 +110,57 @@ test("leaves links edited since the rewrite alone", () => {
 	assert.equal(applyChanges(edited, revert), "[mine](https://aaa.com) [a](https://aaa.com)");
 	assert.equal(planRevert("moved\n" + rewritten, appliedLinks(content, changes)).skipped, 2);
 });
+
+const rewriteProperties = (content: string, options: Partial<RewriteSpec> = {}): string =>
+	applyChanges(content, planRewrite(content, fallbackSkipRanges(content), spec(options), true));
+
+test("leaves property links alone unless asked", () => {
+	const content = '---\nsource: "[a](https://aaa.com)"\n---\n[a](https://aaa.com)';
+	assert.equal(rewrite(content), '---\nsource: "[a](https://aaa.com)"\n---\n[a2](https://aaa.com)');
+	assert.equal(rewriteProperties(content), '---\nsource: "[a2](https://aaa.com)"\n---\n[a2](https://aaa.com)');
+});
+
+test("escapes what it writes for the value's quoting, keeping the rest of the YAML", () => {
+	const content = [
+		"---",
+		'double: "[a](https://aaa.com)" # kept',
+		"single: '[a](https://aaa.com)'",
+		"plain: see [a](https://aaa.com)",
+		'list: ["[a](https://aaa.com)", x]',
+		"---",
+	].join("\n");
+	assert.equal(
+		rewriteProperties(content, { text: `It's "a" \\o/` }),
+		[
+			"---",
+			`double: "[It's \\"a\\" \\\\o/](https://aaa.com)" # kept`,
+			"single: '[It''s \"a\" \\o/](https://aaa.com)'",
+			`plain: see [It's "a" \\o/](https://aaa.com)`,
+			`list: ["[It's \\"a\\" \\\\o/](https://aaa.com)", x]`,
+			"---",
+		].join("\n"),
+	);
+});
+
+test("matches property links by their decoded text", () => {
+	const content = '---\nq: "[\\"a\\"](https://aaa.com)"\n---';
+	assert.equal(rewriteProperties(content, { key: '"a"', text: "b" }), '---\nq: "[b](https://aaa.com)"\n---');
+});
+
+test("quotes an unquoted value that can't hold the new text", () => {
+	const content = "---\nplain: see [a](https://aaa.com) and [a](https://aaa.com/)\n---";
+	assert.equal(
+		rewriteProperties(content, { text: "Docs: intro" }),
+		'---\nplain: "see [Docs: intro](https://aaa.com) and [Docs: intro](https://aaa.com)"\n---',
+	);
+});
+
+test("records property edits for undo", () => {
+	const content = '---\nsource: "[a](https://aaa.com)"\nplain: x [a](https://aaa.com)\n---';
+	const changes = planRewrite(content, fallbackSkipRanges(content), spec({ text: "a: b" }), true);
+	const after = applyChanges(content, changes);
+	assert.equal(after, '---\nsource: "[a: b](https://aaa.com)"\nplain: "x [a: b](https://aaa.com)"\n---');
+	const { changes: revert, skipped } = planRevert(after, appliedLinks(content, changes));
+	assert.equal(skipped, 0);
+	assert.equal(applyChanges(after, revert), content);
+});

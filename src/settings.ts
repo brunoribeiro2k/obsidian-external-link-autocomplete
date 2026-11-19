@@ -10,6 +10,7 @@ export interface ExternalLinkSettings {
 	tabAccepts: boolean;
 	showNoteCount: boolean;
 	showNoteLinks: boolean;
+	indexProperties: boolean;
 	excludedFolders: string[];
 	ignoredTexts: string[];
 	ignoredDomains: string[];
@@ -29,6 +30,7 @@ export const DEFAULT_SETTINGS: ExternalLinkSettings = {
 	tabAccepts: true,
 	showNoteCount: false,
 	showNoteLinks: true,
+	indexProperties: true,
 	excludedFolders: [],
 	ignoredTexts: ["here", "link", "this", "source", "click here"],
 	ignoredDomains: [],
@@ -113,6 +115,11 @@ export class ExternalLinkSettingTab extends PluginSettingTab {
 				control: { type: "toggle", key: "showNoteLinks" },
 			},
 			{
+				name: "Include properties",
+				desc: "Suggest, list and edit links in note properties too, in the properties view and in source mode.",
+				control: { type: "toggle", key: "indexProperties" },
+			},
+			{
 				name: "Ignored link texts",
 				desc: "Links with these texts are never suggested. One per line, case-insensitive.",
 				control: { type: "textarea", key: "ignoredTexts", rows: 4 },
@@ -168,6 +175,9 @@ export class ExternalLinkSettingTab extends PluginSettingTab {
 			await this.plugin.saveSettings("index");
 		} else if (isLineList(key)) {
 			settings[key] = lines(typeof value === "string" ? value : "");
+			await this.plugin.saveSettings("index");
+		} else if (key === "indexProperties") {
+			await super.setControlValue(key, value);
 			await this.plugin.saveSettings("index");
 		} else {
 			await super.setControlValue(key, value);

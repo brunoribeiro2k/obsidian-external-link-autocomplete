@@ -27,10 +27,10 @@ Manual checks for what unit tests can't cover. Type in a scratch note; each line
 
 - [ ] `[o|` (below the 2-character minimum).
 - [ ] `[[ob|`: core's note suggester opens instead.
-- [ ] `![ob|`, `[^ob|`, `- [ |]`, `` `[ob|` ``, inside a fenced code block, inside frontmatter.
+- [ ] `![ob|`, `[^ob|`, `- [ |]`, `` `[ob|` ``, inside a fenced code block, on a property's name or comment in Source mode.
 - [ ] `[ob]|` and `[ob|](https://…)`.
 - [ ] `[private|`: nothing from `Excluded/`.
-- [ ] `[here|`, `[fenced|`, `[indented|`, `[in frontmatter|`: never indexed.
+- [ ] `[here|`, `[fenced|`, `[indented|`, `[in a comment|`, `[in a block|`: never indexed.
 - [ ] Esc closes the popup, and it stays closed while typing more in the same bracket; a new `[` opens it again.
 
 ## Index updates
@@ -83,11 +83,26 @@ Use `Link variants.md`. "Undo last link edit" (below) resets it, or run `make va
 - [ ] Clicking a row selects the first link to that URL and scrolls to it; clicking the `host › path` part opens the URL in the browser instead.
 - [ ] Right-clicking a row offers "Edit link across vault".
 - [ ] With backlinks in document off, the section stands alone right after the last line, with a separator; toggling backlinks moves it between the two places.
-- [ ] Add a link at the end of the note; the section follows within a second, without saving, and stays below the new text. Links in code blocks and frontmatter aren't listed.
+- [ ] Add a link at the end of the note; the section follows within a second, without saving, and stays below the new text. Links in code blocks aren't listed; links in properties are, first.
 - [ ] Clicking the header collapses the section in every open note; it stays collapsed after reopening the note and restarting.
 - [ ] Source mode and reading view show it too (in reading view without backlinks, at the top of the footer), and clicking a row scrolls there. Switching modes moves it along.
 - [ ] A note without external links has no section. Canvas cards and embedded notes never get one.
 - [ ] Settings → "Show external links in notes" off removes every section at once; on brings them back.
+
+## Properties
+
+Use `Properties.md`.
+
+- [ ] `[project plan|`, `[it's|`, `[plain prop|`, `[related|`, `[flow item|` and `[in frontmatter|` suggest the links in properties, with "It's single-quoted" shown with one quote.
+- [ ] Properties view, text property: add `test` with value `[project|`; the popup opens under the input, looking like the editor's. Enter (or Tab, or a click) writes `[📃 GDocs - Project plan](https://…)` into the input with the caret after it, without committing; Enter again commits, and Source mode shows `test: "[📃 GDocs - Project plan](https://…)"`.
+- [ ] Properties view, list property: in `related`, type `[flow|` in the new-item input and accept; Enter adds the pill.
+- [ ] Properties view: Esc closes the popup and keeps the typed text, which stays uncommitted; typing on in the same bracket doesn't reopen it.
+- [ ] Source mode: `key: "[proj|"` inserts the link inside the quotes, `key: [proj|` writes `key: "[📃 GDocs - Project plan](https://…)"`, and `key: '[it|'` writes `It''s` with the quote doubled. The YAML stays valid (the Properties view shows the values).
+- [ ] Source mode: with the cursor on the `google-doc` link, "Edit link across vault" is offered. Renaming it to `GDocs: "Plan"` gives `google-doc: "[GDocs: \"Plan\"](https://…)"`, and the rest of the frontmatter is untouched, comment and block included.
+- [ ] Renaming the `plain` link to `Plain: property` turns its value into `plain: "see [Plain: property](https://example.com/plain) here"`.
+- [ ] Renaming `jira` across the vault (from `Link variants.md`) also updates `related` here; undo puts it back.
+- [ ] The link browser lists the property links, with the YAML line as context; `Properties.md`'s external links section lists them first.
+- [ ] Settings → "Include properties" off: none of the above is suggested, listed or edited, and neither the Properties view nor Source mode frontmatter gets a popup.
 
 ## Platforms
 
